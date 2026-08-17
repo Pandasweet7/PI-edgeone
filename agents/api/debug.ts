@@ -74,6 +74,33 @@ export async function onRequest(context: any): Promise<Response> {
   }
 
   const conversationId = context?.conversation_id ?? 'debug'
+  const aiGatewayProbe: Record<string, unknown> = {}
+  {
+    const baseUrl = String(context?.env?.AI_GATEWAY_BASE_URL ?? '').replace(/\/+$/, '')
+    const apiKey = String(context?.env?.AI_GATEWAY_API_KEY ?? '')
+    const model = String(context?.env?.AI_GATEWAY_MODEL ?? '') || '@makers/deepseek-v4-flash'
+    try {
+      const modelsRes = await fetch(`${baseUrl}/models`, {
+        headers: { authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(15_000),
+      })
+      aiGatewayProbe.models = { status: modelsRes.status, body: (await modelsRes.text()).slice(0, 300) }
+    } catch (error) {
+      aiGatewayProbe.models = { error: String(error).slice(0, 200) }
+    }
+    try {
+      const chatRes = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model, stream: false, messages: [{ role: 'user', content: 'Say ok' }], max_tokens: 4 }),
+        signal: AbortSignal.timeout(60_000),
+      })
+      aiGatewayProbe.chatCompletion = { status: chatRes.status, body: (await chatRes.text()).slice(0, 400) }
+    } catch (error) {
+      aiGatewayProbe.chatCompletion = { error: String(error).slice(0, 240) }
+    }
+  }
+  report.aiGatewayProbe = aiGatewayProbe
   try {
     const sidecar = await getPiWebSidecar(context, conversationId)
     report.sidecar = {
