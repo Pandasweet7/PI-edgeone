@@ -1,0 +1,7 @@
+node_modules/
+.edgeone/
+.env
+dist/
+*.log
+# 550MB vendored extension tree — too large for a template repo; optional local override via `npm run prepare:packages` (see README → Pi Packages §2).
+vendor/pi-packages/

@@ -1,0 +1,72 @@
+import { getPiWebSidecar, scheduleSnapshot } from '../_pi-web-sidecar.ts'
+
+function requestPath(context: any): string {
+  const value = typeof context.request?.url === 'string' ? context.request.url : '/api/proxy'
+  try { return new URL(value, 'http://local').pathname } catch { return '/api/proxy' }
+}
+
+/**
+ * PI WEB client (EdgeOne Makers build) folds every application-relative API
+ * path onto this single route: `api/proxy?target=<original api/... path>`.
+ * The original HTTP method, headers, and parsed JSON body are preserved, and
+ * the request is forwarded to the per-conversation pi-web gateway listening on
+ * 127.0.0.1. Mutating requests schedule a store snapshot afterwards.
+ */
+async function proxy(context: any): Promise<Response> {
+  const conversationId = String(context.conversation_id || '').trim()
+  if (!conversationId) {
+    return Response.json({ error: 'makers-conversation-id is required' }, { status: 400 })
+  }
+  const sidecar = await getPiWebSidecar(context)
+
+  const query = context.request?.query ?? {}
+  const target = typeof query.target === 'string' ? decodeURIComponent(query.target) : ''
+  if (!target.startsWith('api/') || target.startsWith('api/proxy')) {
+    return Response.json({ error: 'Invalid proxy target' }, { status: 400 })
+  }
+
+  const upstreamUrl = new URL(target, `http://127.0.0.1:${String(sidecar.port)}`).toString()
+  const method = String(context.request?.method || 'GET').toUpperCase()
+
+  const forwardedHeaders: Record<string, string> = {
+    accept: context.request?.headers?.accept || '*/*',
+  }
+  const contentType = context.request?.headers?.['content-type']
+  if (typeof contentType === 'string' && contentType !== '') forwardedHeaders['content-type'] = contentType
+
+  const body = method === 'GET' || method === 'HEAD' ? undefined : JSON.stringify(context.request?.body ?? {})
+
+  const upstream = await fetch(upstreamUrl, {
+    method,
+    headers: forwardedHeaders,
+    ...(body === undefined ? {} : { body }),
+    signal: context.request?.signal,
+  })
+
+  const responseHeaders = new Headers(upstream.headers)
+  responseHeaders.delete('content-length')
+  responseHeaders.delete('transfer-encoding')
+  const contentTypeHeader = responseHeaders.get('content-type') ?? ''
+  const isBinary = !contentTypeHeader.includes('json') && !contentTypeHeader.includes('text') && !contentTypeHeader.includes('event-stream')
+  if (isBinary) responseHeaders.set('x-content-type-stream', 'true')
+
+  if (isMutating(method) && upstream.ok) scheduleSnapshot(conversationId, sidecar)
+
+  const bytes = new Uint8Array(await upstream.arrayBuffer())
+  return new Response(bytes, { status: upstream.status, headers: responseHeaders })
+}
+
+function isMutating(method: string): boolean {
+  return method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH'
+}
+
+export async function onRequest(context: any): Promise<Response> {
+  try {
+    return await proxy(context)
+  } catch (error) {
+    return Response.json({
+      error: 'PI_WEB_PROXY_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+    }, { status: 502 })
+  }
+}

@@ -1,0 +1,21 @@
+# Pre-installed Pi Packages for the Makers deployment.
+# One package source per line, same format as `pi install` / Settings → Pi packages:
+#   npm:@scope/name@version    (or npm:name)
+#   git:github.com/user/repo[@ref]
+# Lines starting with # and blank lines are ignored.
+#
+# How it works:
+#   - `npm run prepare:packages` installs these at build time into vendor/pi-packages/
+#     (offline at runtime).
+#   - The sidecar copies them into ~/.pi/agent and seeds settings.json on boot;
+#     anything missing after a cold start is re-installed automatically.
+#   - You can still install/update/remove packages in the PI WEB UI afterwards.
+
+npm:@narumitw/pi-btw@^0.52.0
+npm:@narumitw/pi-goal@^0.51.0
+npm:@plannotator/pi-extension@^0.27.3
+npm:@quintinshaw/pi-dynamic-workflows@^3.5.1
+npm:pi-mcp-adapter@^2.26.0
+npm:pi-setup-custom-providers@^1.0.1
+npm:pi-subagents@^0.50.0
+npm:pi-web-access@^0.23.0
