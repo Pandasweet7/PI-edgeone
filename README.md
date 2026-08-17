@@ -2,7 +2,7 @@
 
 Run the [PI Coding Agent](https://pi.dev) with its official [PI WEB](https://pi-web.dev) UI on [EdgeOne Makers](https://edgeone.ai/makers) — fork the DeepSeek Harness deployment pattern: static SPA + Makers agent functions + a per-conversation sidecar running the real pi-web gateway and session daemon.
 
-[![Deploy to EdgeOne Makers](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/makers/new?template=pi-web-makers)
+[![Deploy to EdgeOne Makers](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/makers/new?template=https://github.com/Pandasweet7/PI-edgeone)
 
 ## What you get
 
