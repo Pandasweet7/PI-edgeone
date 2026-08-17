@@ -61,7 +61,7 @@ function eventStream(context: any): Response {
             controller.enqueue(encoder.encode(': connected\n\n'))
             heartbeat = setInterval(() => {
               try { controller.enqueue(encoder.encode(': ping\n\n')) } catch { close() }
-            }, 20_000)
+            }, 5_000)
           } catch { close() }
         })
         socket.on('message', data => {
