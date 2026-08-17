@@ -96,11 +96,28 @@ The install runs `npm install` / `git clone` inside the conversation sandbox, so
 
 This template already includes a preset flow:
 
-1. Edit [`pi-packages.txt`](pi-packages.txt) — one source per line (`npm:name@version` or `git:...`). It is pre-populated with a ready-made set (pi-mcp-adapter, pi-subagents, pi-web-access, plannotator, dynamic-workflows, …).
+1. Edit [`pi-packages.txt`](pi-packages.txt) — one source per line (`npm:name@version`; git sources need network tools unavailable in the Makers sandbox). It ships with a deliberately small starter set (pi-mcp-adapter, pi-subagents) — see the sandbox storage budget below.
 2. Run `npm run prepare:packages` at build time — installs everything into `vendor/pi-packages/` (`--omit=dev`); runtime needs no sandbox network for these packages.
 3. On boot the sidecar copies the vendored tree into `~/.pi/agent` and merges the sources into `settings.json`. UI installs/removals afterwards still work; snapshots keep the list; cold starts re-install anything missing.
 
-> The vendored tree for the sample list is ~550 MB. Shrink `pi-packages.txt` before `prepare:packages` if deploy size matters.
+> The vendored tree for an 8-package set is ~550 MB. Shrink `pi-packages.txt` before `prepare:packages` if deploy size matters — and on the Makers sandbox it ALSO matters for runtime storage, see below.
+
+### Sandbox storage budget (Makers)
+
+The sandbox runs with a small TMPFS at `/tmp` (order of hundreds of MB). Everything the conversation does lives there:
+
+| Consumer | Approx. size |
+|---|---|
+| vendored pi-web runtime + agent SDK (bundle) | ~130 MB |
+| per-conversation home (`/tmp/piweb-makers/<id>/`) — settings, sessions, workspace, logs | 1–10 MB |
+| installed Pi Packages (`~/.pi/agent/npm`) | tens of MB each; ~550 MB for the earlier 8-package list |
+| shared npm cache (`/tmp/npm-cache`) | bounded by use, cleared with the sandbox |
+
+Rules of thumb:
+
+- Keep `pi-packages.txt` short (2–3 packages). More → install interactively in **Settings → Pi packages**, one at a time, and watch free space via `/api/debug` (`tmpDisk`).
+- An `ENOSPC: no space left on device` error when sending the first message means the package install filled `/tmp`; remove packages from `settings.json` and retry.
+- Conversation homes are released when the sidecar is reaped (idle ~4 min) — snapshots keep settings/sessions/workspace in the conversation store, package code is intentionally not snapshotted (it is re-installed online on cold start).
 
 ### 3. Seed the settings file
 

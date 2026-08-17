@@ -68,6 +68,10 @@ export async function onRequest(context: any): Promise<Response> {
   } catch {
     report.tmpWritable = false
   }
+  report.tmpDisk = {
+    df: (() => { try { return execFileSync('df', ['-h', '/tmp'], { timeout: 5_000 }).toString().trim().split('\n').pop() } catch { return '(df unavailable)' } })(),
+    homesDu: (() => { try { return execFileSync('du', ['-sh', '/tmp/piweb-makers', '/tmp/npm-cache'], { timeout: 10_000 }).toString().trim() } catch { return '(du unavailable)' } })(),
+  }
 
   const conversationId = context?.conversation_id ?? 'debug'
   try {

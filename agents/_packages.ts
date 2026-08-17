@@ -103,11 +103,22 @@ export function findMissingPackages(agentDir: string): MissingPackage[] {
   return missing
 }
 
+// Shared npm cache across conversations (saves the /tmp TMPFS budget per
+// conversation home; packages themselves are space-bounded on purpose).
+const NPM_CACHE_DIR = '/tmp/npm-cache'
+
 async function runCommand(command: string, args: string[], options: { cwd?: string; timeoutMs: number }): Promise<void> {
   await execFileAsync(command, args, {
     cwd: options.cwd,
     timeout: options.timeoutMs,
-    env: { ...process.env, NO_COLOR: '1', npm_config_audit: 'false', npm_config_fund: 'false' },
+    env: {
+      ...process.env,
+      NO_COLOR: '1',
+      npm_config_audit: 'false',
+      npm_config_fund: 'false',
+      npm_config_cache: NPM_CACHE_DIR,
+      npm_config_prefer_offline: 'true',
+    },
   })
 }
 

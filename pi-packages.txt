@@ -1,21 +1,21 @@
 # Pre-installed Pi Packages for the Makers deployment.
 # One package source per line, same format as `pi install` / Settings → Pi packages:
 #   npm:@scope/name@version    (or npm:name)
-#   git:github.com/user/repo[@ref]
+#   git:github.com/user/repo[@ref]   (NOTE: git is unavailable in the Makers sandbox)
 # Lines starting with # and blank lines are ignored.
+#
+# IMPORTANT — /tmp budget: the Makers sandbox /tmp is a small TMPFS (~512 MB-ish).
+# A full extension set (~550 MB of node_modules for 8 packages) triggers ENOSPC
+# on first boot. Keep this list short; install the rest from the UI's
+# Settings → Pi packages later (each still consumes sandbox /tmp, so budget it).
 #
 # How it works:
 #   - `npm run prepare:packages` installs these at build time into vendor/pi-packages/
-#     (offline at runtime).
-#   - The sidecar copies them into ~/.pi/agent and seeds settings.json on boot;
-#     anything missing after a cold start is re-installed automatically.
-#   - You can still install/update/remove packages in the PI WEB UI afterwards.
+#     (offline at runtime; only useful for self-hosted deployments of this tree,
+#     since Makers does not ship vendor/ into the sandbox).
+#   - The sidecar seeds `settings.json` with these sources on boot; the matching
+#     code is re-installed online by `_packages.ts` on cold start (npm cache is
+#     shared at /tmp/npm-cache to keep the space cost low).
 
-npm:@narumitw/pi-btw@^0.52.0
-npm:@narumitw/pi-goal@^0.51.0
-npm:@plannotator/pi-extension@^0.27.3
-npm:@quintinshaw/pi-dynamic-workflows@^3.5.1
 npm:pi-mcp-adapter@^2.26.0
-npm:pi-setup-custom-providers@^1.0.1
 npm:pi-subagents@^0.50.0
-npm:pi-web-access@^0.23.0

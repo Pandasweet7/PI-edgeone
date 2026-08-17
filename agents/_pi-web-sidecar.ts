@@ -14,7 +14,6 @@ import { captureSnapshot, readSnapshotFromStore, restoreSnapshot, writeSnapshotT
 // sync only ships packages reachable through the import graph. The marker main
 // is a no-op module, but it puts @jmfederico/pi-web into the agent bundle so
 // the sidecar can spawn it from node_modules at runtime.
-// @ts-expect-error marker package intentionally ships no type declarations.
 import '@jmfederico/pi-web'
 
 // The PI WEB runtime is vendored into this template (scripts/prepare-pi-web.mjs):
@@ -200,16 +199,14 @@ async function copyTree(src: string, dest: string): Promise<void> {
 
 // Mirrors pi-packages.txt. Vendor tree not shipped into the Makers sandbox,
 // so this list doubles as the cold-start fallback: sidecar seeds settings.json
-// with it and _packages.ts re-installs everything online on first boot.
+// with it and _packages.ts re-installs everything online on first boot. Keep
+// the default list small: the sandbox /tmp is a small TMPFS and a full
+// extension set (~550MB of node_modules) triggers ENOSPC at first boot — see
+// README "Sandbox storage budget". Additional packages install cleanly from
+// the UI's Settings → Pi packages when the user wants them.
 const DEFAULT_PACKAGE_SOURCES = [
-  'npm:@narumitw/pi-btw@^0.52.0',
-  'npm:@narumitw/pi-goal@^0.51.0',
-  'npm:@plannotator/pi-extension@^0.27.3',
-  'npm:@quintinshaw/pi-dynamic-workflows@^3.5.1',
   'npm:pi-mcp-adapter@^2.26.0',
-  'npm:pi-setup-custom-providers@^1.0.1',
   'npm:pi-subagents@^0.50.0',
-  'npm:pi-web-access@^0.23.0',
 ]
 
 /**
@@ -393,8 +390,12 @@ async function startSidecar(context: any, conversationId: string): Promise<PiWeb
     lastUsedAt: Date.now(),
     context,
     async close() {
+      // Snapshot first, then release /tmp (the conversation home holds the
+      // installed package tree and logs; the snapshot restores everything that
+      // should persist).
       await snapshotNow(sidecar)
       await Promise.allSettled([gateway.close(), stopChild(sessiond), stopChild(gatewayProcess)])
+      try { await rm(home, { recursive: true, force: true }) } catch { /* best effort */ }
     },
   }
   for (const child of [sessiond, gatewayProcess]) {
