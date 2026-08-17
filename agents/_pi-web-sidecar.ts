@@ -113,7 +113,6 @@ const MAKERS_MODELS: Array<{ id: string; name: string; reasoning?: boolean }> = 
 async function writeAgentModels(home: string, gatewayBaseUrl: string, defaultModel: string): Promise<void> {
   const modelsPath = join(home, 'pi-agent', 'models.json')
   const existing = await readExistingModels(modelsPath)
-  if (existing?.providers?.[MAKERS_PROVIDER] !== undefined) return
   const catalog = [...MAKERS_MODELS]
   if (!catalog.some(model => model.id === defaultModel)) catalog.unshift({ id: defaultModel, name: defaultModel })
   const models = catalog.map(model => ({
@@ -124,6 +123,10 @@ async function writeAgentModels(home: string, gatewayBaseUrl: string, defaultMod
     maxTokens: 256_000,
     compat: model.reasoning === true ? { thinkingFormat: 'deepseek' } : undefined,
   }))
+  // Always rewrite the edgeone-makers provider with the CURRENT gateway proxy
+  // port: the local gateway proxy binds a fresh random port on every sidecar
+  // start, so a persisted/old models.json pointing at a previous port would
+  // make the agent's model requests fail with APIConnectionError.
   const next = {
     ...(existing ?? {}),
     providers: {

@@ -104,7 +104,10 @@ export async function captureSnapshot(home: string): Promise<PiWebSnapshot> {
   const snapshot = emptySnapshot()
   snapshot.configJson = await readOptionalFile(join(home, 'pi-web', 'config.json'))
   snapshot.agentSettings = await readOptionalFile(join(home, 'pi-agent', 'settings.json'))
-  snapshot.agentModels = await readOptionalFile(join(home, 'pi-agent', 'models.json'))
+  // models.json is intentionally NOT snapshotted: its edgeone-makers provider
+  // carries the local gateway proxy's port, which is freshly assigned on every
+  // sidecar start (see writeAgentModels in _pi-web-sidecar.ts). Persisting it
+  // would restore a stale port and break every model call after a cold start.
 
   const sessionsDir = join(home, 'pi-agent', 'sessions')
   const sessionFiles = await collectSessionFiles(sessionsDir)
@@ -191,7 +194,8 @@ export async function restoreSnapshot(home: string, snapshot: PiWebSnapshot): Pr
   await mkdir(home, { recursive: true })
   await writeMaybe(join(home, 'pi-web', 'config.json'), snapshot.configJson)
   await writeMaybe(join(home, 'pi-agent', 'settings.json'), snapshot.agentSettings)
-  await writeMaybe(join(home, 'pi-agent', 'models.json'), snapshot.agentModels)
+  // models.json is rebuilt with the current gateway proxy port at sidecar
+  // startup; do not restore a possibly stale one from an older snapshot.
   for (const [name, content] of Object.entries(snapshot.sessions)) {
     if (typeof content !== 'string') continue
     const target = join(home, 'pi-agent', 'sessions', name)
