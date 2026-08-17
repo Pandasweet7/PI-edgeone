@@ -108,6 +108,22 @@ export async function onRequest(context: any): Promise<Response> {
       port: sidecar.port,
       home: sidecar.home,
     }
+    // Probe the same path the agent uses: model traffic through the local
+    // gateway proxy (127.0.0.1), NOT the upstream directly. This separates "agent
+    // can't reach the local proxy" from "local proxy can't reach upstream".
+    const baseUrl = String(context?.env?.AI_GATEWAY_BASE_URL ?? '').replace(/\/+$/, '')
+    const model = String(context?.env?.AI_GATEWAY_MODEL ?? '') || '@makers/deepseek-v4-flash'
+    try {
+      const viaLocal = await fetch(`${sidecar.gateway.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer makers-proxy', 'content-type': 'application/json' },
+        body: JSON.stringify({ model, stream: false, messages: [{ role: 'user', content: 'Say ok' }], max_tokens: 4 }),
+        signal: AbortSignal.timeout(60_000),
+      })
+      report.viaLocalGateway = { url: sidecar.gateway.baseUrl, status: viaLocal.status, body: (await viaLocal.text()).slice(0, 400), upstreamBaseUrl: baseUrl ? '(set)' : '(missing)' }
+    } catch (error) {
+      report.viaLocalGateway = { url: sidecar.gateway.baseUrl, error: String(error).slice(0, 240) }
+    }
     try {
       const health = await fetch(`http://127.0.0.1:${sidecar.port}/api/pi-web/status?refresh=1`, { signal: AbortSignal.timeout(5_000) })
       report.gatewayStatus = await health.json()
