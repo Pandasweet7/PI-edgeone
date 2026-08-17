@@ -1,5 +1,5 @@
 {
-  "installCommand": "npm ci",
+  "installCommand": "npm ci --omit=dev",
   "buildCommand": "npm run build:makers",
   "outputDirectory": "public",
   "nodeVersion": "24",
@@ -7,11 +7,9 @@
     "framework": "openai-sdk",
     "timeout": 600,
     "externalNodeModules": [
-      "@jmfederico/pi-web",
       "@earendil-works/pi-coding-agent",
       "@earendil-works/pi-agent-core",
       "@earendil-works/pi-ai",
-      "node-pty",
       "fastify",
       "@fastify/compress",
       "@fastify/static",
