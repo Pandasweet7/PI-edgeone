@@ -7,7 +7,7 @@
  * REMOVE THIS ROUTE for production (it leaks environment details).
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { getPiWebSidecar, piWebHomeFor } from '../_pi-web-sidecar.ts'
 
@@ -178,6 +178,33 @@ export async function onRequest(context: any): Promise<Response> {
   report.logs = {
     sessiond: tailLog(join(home, 'pi-web', 'logs', 'sessiond.log')),
     gateway: tailLog(join(home, 'pi-web', 'logs', 'gateway.log')),
+  }
+  // Exactly the provider config the session daemon consumes, and the latest
+  // agent session transcript — the session jsonl holds the real
+  // APIConnectionError stack when the SDK can't reach the model.
+  report.agentConfig = {
+    modelsJson: tailLog(join(home, 'pi-agent', 'models.json'), 1_500),
+    settingsJson: tailLog(join(home, 'pi-agent', 'settings.json'), 1_200),
+  }
+  try {
+    const sessionsRoot = join(home, 'pi-agent', 'sessions')
+    const newest: { file: string, mtime: number }[] = []
+    const walk = (dir: string) => {
+      if (!existsSync(dir)) return
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, entry.name)
+        if (entry.isDirectory()) walk(p)
+        else if (entry.name.endsWith('.jsonl')) {
+          const st = statSync(p)
+          newest.push({ file: p, mtime: st.mtimeMs })
+        }
+      }
+    }
+    walk(sessionsRoot)
+    newest.sort((a, b) => b.mtime - a.mtime)
+    report.latestSessionTranscript = newest.slice(0, 1).map(entry => ({ file: entry.file, tail: tailLog(entry.file, 4_000) }))
+  } catch (error) {
+    report.latestSessionTranscript = `probe failed: ${String(error).slice(0, 160)}`
   }
   return jsonResponse(report)
 }
