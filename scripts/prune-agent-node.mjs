@@ -8,7 +8,6 @@
  * vendor tree by path).
  *
  * What we remove:
- *  - vendor/pi-web/dist/docker: Docker integration, unusable in the sandbox
  *  - *.map source maps across node_modules + vendor/pi-web (~69 MB)
  *  - pi-coding-agent docs/examples/CHANGELOG (~4 MB)
  * pi-web-plugins are the runtime-required built-in server plugins — keep them.
@@ -51,16 +50,6 @@ async function removeFilesMatching(rootDir, match, label) {
   }
   await walk(rootDir)
   console.log(`[prune] ${label}: removed ${files} file(s), ${(bytes / 1_048_576).toFixed(1)} MiB`)
-}
-
-const vendorRoot = join(templateRoot, 'vendor', 'pi-web', 'dist')
-for (const target of [join(vendorRoot, 'docker')]) {
-  try {
-    await rm(target, { recursive: true, force: true })
-    console.log(`[prune] removed ${target}`)
-  } catch (error) {
-    console.warn(`[prune] could not remove ${target}:`, error)
-  }
 }
 
 await removeFilesMatching(join(templateRoot, 'node_modules'), name => name.endsWith('.map'), 'node_modules *.map')

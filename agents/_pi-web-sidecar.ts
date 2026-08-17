@@ -13,7 +13,25 @@ import { captureSnapshot, readSnapshotFromStore, restoreSnapshot, writeSnapshotT
 // The PI WEB runtime is vendored into this template (scripts/prepare-pi-web.mjs):
 //   vendor/pi-web/dist/server/index.js   gateway process
 //   vendor/pi-web/dist/server/sessiond.js session daemon
-const templateRoot = dirname(dirname(fileURLToPath(import.meta.url)))
+// Resolve the template root (the deployed code root). Bundling relocates the
+// agent functions away from the repository layout, so import.meta.url-based
+// detection finds /tmp instead of /tmp/user-code on Makers. Prefer cwd (the
+// sandbox runs the function from the code root) and fall back to the module
+// layout for local development; accept the first candidate that actually
+// contains the vendored runtime.
+const templateRoot = resolveTemplateRoot()
+
+function resolveTemplateRoot(): string {
+  const candidates = [
+    process.env.PI_WEB_TEMPLATE_ROOT,
+    process.cwd(),
+    dirname(dirname(fileURLToPath(import.meta.url))),
+  ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate !== '')
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, 'vendor', 'pi-web', 'dist', 'server', 'sessiond.js'))) return candidate
+  }
+  return process.cwd()
+}
 
 export interface PiWebSidecar {
   conversationId: string

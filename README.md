@@ -88,6 +88,8 @@ https://github.com/user/repo
 
 The install runs `npm install` / `git clone` inside the conversation sandbox, so it needs the sandbox to reach the npm registry and git remotes. The installed list is written to `settings.json`, which **is** part of the snapshot.
 
+> ⚠️ Sandbox tool availability (verified on EdgeOne Makers): **npm ✅ / git ❌**. `git:` sources fail to install at runtime — prefer `npm:` sources or vendor git packages at build time with `npm run prepare:packages` (see §2).
+
 > ⚠️ The package *code* (under `~/.pi/agent/npm` and `~/.pi/agent/git`) is **not** snapshotted — it is large. On a cold start the sidecar re-installs every configured package that is missing from disk automatically (see `agents/_packages.ts`). This takes a few seconds to a minute per cold start, depending on package count.
 
 ### 2. Pre-install in the template (offline, deterministic) — ship your extension set
