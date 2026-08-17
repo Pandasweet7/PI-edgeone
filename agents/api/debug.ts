@@ -7,7 +7,7 @@
  * REMOVE THIS ROUTE for production (it leaks environment details).
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getPiWebSidecar, piWebHomeFor } from '../_pi-web-sidecar.ts'
 
@@ -27,7 +27,20 @@ function tailLog(path: string, bytes = 3_000): string {
   }
 }
 
+function lsSafe(dir: string): string[] {
+  try { return readdirSync(dir) } catch { return ['(missing)'] }
+}
+
 export async function onRequest(context: any): Promise<Response> {
+  const fsProbe = {
+    cwd: process.cwd(),
+    codeRootTop: lsSafe(process.cwd()),
+    vendorDir: lsSafe(join(process.cwd(), 'vendor')),
+    vendorPiWebDistServer: lsSafe(join(process.cwd(), 'vendor', 'pi-web', 'dist', 'server')).slice(0, 8),
+    nodeModulesPiWeb: lsSafe(join(process.cwd(), 'node_modules', '@jmfederico', 'pi-web')).slice(0, 8),
+    sessiondViaNodeModules: existsSync(join(process.cwd(), 'node_modules', '@jmfederico', 'pi-web', 'dist', 'server', 'sessiond.js')),
+    sessiondViaVendor: existsSync(join(process.cwd(), 'vendor', 'pi-web', 'dist', 'server', 'sessiond.js')),
+  }
   const toolProbe: Record<string, string> = {}
   const report: Record<string, unknown> = {
     node: process.version,
@@ -73,6 +86,8 @@ export async function onRequest(context: any): Promise<Response> {
   } catch (error) {
     report.sidecar = { status: 'FAILED', error: error instanceof Error ? error.message : String(error) }
   }
+
+  report.fs = fsProbe
 
   const home = piWebHomeFor(conversationId)
   report.logs = {

@@ -13,24 +13,31 @@ import { captureSnapshot, readSnapshotFromStore, restoreSnapshot, writeSnapshotT
 // The PI WEB runtime is vendored into this template (scripts/prepare-pi-web.mjs):
 //   vendor/pi-web/dist/server/index.js   gateway process
 //   vendor/pi-web/dist/server/sessiond.js session daemon
-// Resolve the template root (the deployed code root). Bundling relocates the
-// agent functions away from the repository layout, so import.meta.url-based
-// detection finds /tmp instead of /tmp/user-code on Makers. Prefer cwd (the
-// sandbox runs the function from the code root) and fall back to the module
-// layout for local development; accept the first candidate that actually
-// contains the vendored runtime.
-const templateRoot = resolveTemplateRoot()
+// Resolve the template root (the deployed code root) alongside the vendored
+// runtime directory. The Makers deployment does not ship the repository's
+// vendor/ tree into the sandbox — only node_modules makes it. Build copies the
+// vendored runtime into node_modules/@jmfederico/pi-web (prepare-pi-web.mjs).
+interface ResolvedRuntime { root: string, runtimeDir: string }
 
-function resolveTemplateRoot(): string {
+const resolvedRuntime = resolveRuntime()
+const templateRoot = resolvedRuntime.root
+const piWebRuntimeDir = resolvedRuntime.runtimeDir
+
+function resolveRuntime(): ResolvedRuntime {
   const candidates = [
     process.env.PI_WEB_TEMPLATE_ROOT,
     process.cwd(),
     dirname(dirname(fileURLToPath(import.meta.url))),
   ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate !== '')
   for (const candidate of candidates) {
-    if (existsSync(join(candidate, 'vendor', 'pi-web', 'dist', 'server', 'sessiond.js'))) return candidate
+    if (existsSync(join(candidate, 'node_modules', '@jmfederico', 'pi-web', 'dist', 'server', 'sessiond.js'))) {
+      return { root: candidate, runtimeDir: join(candidate, 'node_modules', '@jmfederico', 'pi-web') }
+    }
+    if (existsSync(join(candidate, 'vendor', 'pi-web', 'dist', 'server', 'sessiond.js'))) {
+      return { root: candidate, runtimeDir: join(candidate, 'vendor', 'pi-web') }
+    }
   }
-  return process.cwd()
+  return { root: process.cwd(), runtimeDir: join(process.cwd(), 'vendor', 'pi-web') }
 }
 
 export interface PiWebSidecar {
@@ -150,11 +157,11 @@ async function freePort(): Promise<number> {
 }
 
 function piWebServerPath(): string {
-  return join(templateRoot, 'vendor', 'pi-web', 'dist', 'server', 'index.js')
+  return join(piWebRuntimeDir, 'dist', 'server', 'index.js')
 }
 
 function piWebSessiondPath(): string {
-  return join(templateRoot, 'vendor', 'pi-web', 'dist', 'server', 'sessiond.js')
+  return join(piWebRuntimeDir, 'dist', 'server', 'sessiond.js')
 }
 
 /** Open an append-mode fd children inherit as stdout/stderr. */
@@ -184,29 +191,47 @@ async function copyTree(src: string, dest: string): Promise<void> {
   }
 }
 
+// Mirrors pi-packages.txt. Vendor tree not shipped into the Makers sandbox,
+// so this list doubles as the cold-start fallback: sidecar seeds settings.json
+// with it and _packages.ts re-installs everything online on first boot.
+const DEFAULT_PACKAGE_SOURCES = [
+  'npm:@narumitw/pi-btw@^0.52.0',
+  'npm:@narumitw/pi-goal@^0.51.0',
+  'npm:@plannotator/pi-extension@^0.27.3',
+  'npm:@quintinshaw/pi-dynamic-workflows@^3.5.1',
+  'npm:pi-mcp-adapter@^2.26.0',
+  'npm:pi-setup-custom-providers@^1.0.1',
+  'npm:pi-subagents@^0.50.0',
+  'npm:pi-web-access@^0.23.0',
+]
+
 /**
  * Copy build-time vendored packages (vendor/pi-packages/{npm,git}) into the
  * conversation's agent dir and seed settings.json `packages` so PI WEB lists
  * them as installed. First-copy semantics: once an npm/ or git/ tree exists in
  * the sandbox, later boots leave it alone (snapshots + _packages.ts handle the
- * rest of the lifecycle).
+ * rest of the lifecycle). The settings list is seeded from vendor/pi-packages
+ * when present, otherwise from DEFAULT_PACKAGE_SOURCES.
  */
 async function seedVendorPackages(home: string): Promise<void> {
   const vendorRoot = join(templateRoot, 'vendor', 'pi-packages')
   const sourcesPath = join(vendorRoot, 'sources.json')
-  if (!existsSync(sourcesPath)) return
-  let sources: string[] = []
-  try {
-    sources = (JSON.parse(await readFile(sourcesPath, 'utf8')) as { sources?: string[] }).sources ?? []
-  } catch {
-    return
+  let sources = DEFAULT_PACKAGE_SOURCES
+  let vendorPresent = false
+  if (existsSync(sourcesPath)) {
+    try {
+      sources = (JSON.parse(await readFile(sourcesPath, 'utf8')) as { sources?: string[] }).sources ?? DEFAULT_PACKAGE_SOURCES
+      vendorPresent = true
+    } catch { /* fall back */ }
   }
   const agentDir = join(home, 'pi-agent')
-  for (const kind of ['npm', 'git'] as const) {
-    const src = join(vendorRoot, kind)
-    const dest = join(agentDir, kind)
-    if (existsSync(src) && !existsSync(dest)) {
-      await copyTree(src, dest)
+  if (vendorPresent) {
+    for (const kind of ['npm', 'git'] as const) {
+      const src = join(vendorRoot, kind)
+      const dest = join(agentDir, kind)
+      if (existsSync(src) && !existsSync(dest)) {
+        await copyTree(src, dest)
+      }
     }
   }
   const settingsPath = join(agentDir, 'settings.json')

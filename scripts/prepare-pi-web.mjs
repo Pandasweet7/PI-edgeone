@@ -58,6 +58,7 @@ async function main() {
     ])
     if (publicIndex && serverEntry) {
       console.log('[prepare-pi-web] vendored PI WEB already present (public/, vendor/pi-web) — skipping (set PI_WEB_DIST to re-vendor)')
+      await mirrorVendorIntoNodeModules(join(templateRoot, 'node_modules', '@jmfederico', 'pi-web'))
       return
     }
     console.error('PI_WEB_DIST is required: point it at the Makers build of the pi-web fork (dist/).')
@@ -140,6 +141,26 @@ async function main() {
   }
   console.log(`  public/  ${publicFiles} files`)
   console.log(`  vendor/  ${vendorFiles} files`)
+
+  // The Makers deployment does NOT ship the repository's vendor/ directory
+  // into the agent sandbox — only agent code and node_modules make it. Mirror
+  // the vendored server runtime into node_modules/@jmfederico/pi-web so the
+  // sidecar can resolve it from the standard module layout too.
+  await mirrorVendorIntoNodeModules(join(templateRoot, 'node_modules', '@jmfederico', 'pi-web'))
+}
+
+async function mirrorVendorIntoNodeModules(targetDir) {
+  const vendorDir = join(templateRoot, 'vendor', 'pi-web')
+  try {
+    await readFile(join(vendorDir, 'dist', 'server', 'sessiond.js'))
+  } catch {
+    console.log('No vendored pi-web present yet; node_modules mirror skipped.')
+    return
+  }
+  await rm(targetDir, { recursive: true, force: true })
+  await mkdir(join(targetDir, '..', '..'), { recursive: true })
+  await cp(vendorDir, targetDir, { recursive: true })
+  console.log(`Mirrored vendor/pi-web -> ${targetDir}`)
 }
 
 await main()
