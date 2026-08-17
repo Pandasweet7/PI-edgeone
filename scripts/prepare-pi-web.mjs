@@ -49,6 +49,17 @@ const makersBootstrapScript = `(() => {
 async function main() {
   const src = process.env.PI_WEB_DIST
   if (!src) {
+    // The repository ships the vendored build (public/ + vendor/pi-web), so
+    // CI (EdgeOne Pages StaticAssetsBuilder -> npm run build:makers) does not
+    // need a source. Only fail when the vendored output is genuinely missing.
+    const [publicIndex, serverEntry] = await Promise.all([
+      readFile(join(templateRoot, 'public', 'index.html')).then(() => true).catch(() => false),
+      readFile(join(templateRoot, 'vendor', 'pi-web', 'dist', 'server', 'sessiond.js')).then(() => true).catch(() => false),
+    ])
+    if (publicIndex && serverEntry) {
+      console.log('[prepare-pi-web] vendored PI WEB already present (public/, vendor/pi-web) — skipping (set PI_WEB_DIST to re-vendor)')
+      return
+    }
     console.error('PI_WEB_DIST is required: point it at the Makers build of the pi-web fork (dist/).')
     process.exit(1)
   }

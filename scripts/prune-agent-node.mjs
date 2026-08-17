@@ -13,10 +13,12 @@ import { fileURLToPath } from 'node:url'
 const templateRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const vendorRoot = join(templateRoot, 'vendor', 'pi-web', 'dist')
 
+// docker integration is unusable in the Makers sandbox; everything else in the
+// vendored dist is load-bearing at runtime (nativeServices are small and
+// referenced by the service-management routes, pi-web-plugins are the built-in
+// server plugins).
 const candidates = [
   join(vendorRoot, 'docker'),
-  join(vendorRoot, 'nativeServices'),
-  join(vendorRoot, 'pi-web-plugins'),
 ]
 
 for (const target of candidates) {
