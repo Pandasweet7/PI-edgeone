@@ -124,6 +124,44 @@ export async function onRequest(context: any): Promise<Response> {
     } catch (error) {
       report.viaLocalGateway = { url: sidecar.gateway.baseUrl, error: String(error).slice(0, 240) }
     }
+    // The agent actually calls the model with stream:true — verify the SSE
+    // path (non-streaming already works). Only consume a few frames.
+    try {
+      const streamRes = await fetch(`${sidecar.gateway.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer makers-proxy', 'content-type': 'application/json', accept: 'text/event-stream' },
+        body: JSON.stringify({ model, stream: true, messages: [{ role: 'user', content: 'Say ok' }], max_tokens: 6 }),
+        signal: AbortSignal.timeout(45_000),
+      })
+      if (streamRes.status !== 200 || !streamRes.body) {
+        report.viaLocalGatewayStream = { status: streamRes.status, body: (await streamRes.text()).slice(0, 400) }
+      } else {
+        const reader = streamRes.body.getReader()
+        const decoder = new TextDecoder()
+        let text = ''
+        const deadline = Date.now() + 20_000
+        while (Date.now() < deadline && text.length < 600) {
+          const { value, done } = await reader.read()
+          if (done) break
+          text += decoder.decode(value, { stream: true })
+        }
+        try { reader.releaseLock() } catch { /* ignore */ }
+        report.viaLocalGatewayStream = { status: streamRes.status, frames: text.slice(0, 600) }
+      }
+    } catch (error) {
+      report.viaLocalGatewayStream = { error: String(error).slice(0, 240) }
+    }
+    // Proxy env vars: if the sandbox forces outbound traffic through a proxy,
+    // the session daemon's whitelist-only env propagation may strip them and
+    // the agent's model fetch then dies on direct egress.
+    report.proxyEnv = {
+      HTTP_PROXY: process.env.HTTP_PROXY ? '(set)' : '',
+      HTTPS_PROXY: process.env.HTTPS_PROXY ? '(set)' : '',
+      ALL_PROXY: process.env.ALL_PROXY ? '(set)' : '',
+      NO_PROXY: process.env.NO_PROXY ?? '',
+      http_proxy: process.env.http_proxy ? '(set)' : '',
+      https_proxy: process.env.https_proxy ? '(set)' : '',
+    }
     try {
       const health = await fetch(`http://127.0.0.1:${sidecar.port}/api/pi-web/status?refresh=1`, { signal: AbortSignal.timeout(5_000) })
       report.gatewayStatus = await health.json()
