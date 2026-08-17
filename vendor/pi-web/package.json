@@ -2,5 +2,6 @@
   "name": "@jmfederico/pi-web",
   "version": "0.0.0-makers",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "main": "dist/runtime-marker.js"
 }

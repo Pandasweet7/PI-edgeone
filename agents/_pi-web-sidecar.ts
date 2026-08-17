@@ -10,6 +10,13 @@ import { startLocalGatewayProxy, type LocalGatewayProxy } from './_gateway-proxy
 import { reinstallMissingPackages } from './_packages.ts'
 import { captureSnapshot, readSnapshotFromStore, restoreSnapshot, writeSnapshotToStore, type PiWebSnapshot } from './_store.ts'
 
+// Side-effect import of the vendored package name: EdgeOne's agent dependency
+// sync only ships packages reachable through the import graph. The marker main
+// is a no-op module, but it puts @jmfederico/pi-web into the agent bundle so
+// the sidecar can spawn it from node_modules at runtime.
+// @ts-expect-error marker package intentionally ships no type declarations.
+import '@jmfederico/pi-web'
+
 // The PI WEB runtime is vendored into this template (scripts/prepare-pi-web.mjs):
 //   vendor/pi-web/dist/server/index.js   gateway process
 //   vendor/pi-web/dist/server/sessiond.js session daemon

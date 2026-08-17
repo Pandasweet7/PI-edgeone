@@ -1,1 +1,0 @@
-{"version":3,"file":"machineStatusRoutes.js","sourceRoot":"","sources":["../../../src/server/status/machineStatusRoutes.ts"],"names":[],"mappings":"AAOA;;;GAGG;AACH,MAAM,UAAU,2BAA2B,CAAC,GAAoB,EAAE,MAAiC,EAAE,MAAM,GAAG,EAAE;IAC9G,GAAG,CAAC,GAAG,CAAC,GAAG,MAAM,SAAS,EAAE,GAAG,EAAE,CAAC,MAAM,CAAC,QAAQ,EAAE,CAAC,CAAC;AACvD,CAAC"}

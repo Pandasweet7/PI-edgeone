@@ -94,12 +94,17 @@ async function main() {
   await rm(join(vendorDir, 'dist', 'client'), { recursive: true, force: true })
 
   // The vendored server is loaded by the agent sidecar; give it a package
-  // marker so it can resolve as a package for createRequire if needed.
+  // marker so it can resolve as a package for createRequire if needed. The
+  // lightweight main entry lets agent code import the package name so
+  // EdgeOne's dependency sync (which follows the import graph) ships it.
+  const markerPath = join(vendorDir, 'dist', 'runtime-marker.js')
+  await writeFile(markerPath, 'export {}\n')
   await writeFile(join(vendorDir, 'package.json'), JSON.stringify({
     name: '@jmfederico/pi-web',
     version: '0.0.0-makers',
     private: true,
     type: 'module',
+    main: 'dist/runtime-marker.js',
   }, null, 2) + '\n')
 
   // Inject the makers bootstrap into the SPA shell.
