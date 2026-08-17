@@ -1,7 +1,7 @@
 {
   "installCommand": "npm ci",
   "buildCommand": "npm run build:makers",
-  "outputDirectory": "dist",
+  "outputDirectory": "public",
   "nodeVersion": "24",
   "agents": {
     "framework": "openai-sdk",
