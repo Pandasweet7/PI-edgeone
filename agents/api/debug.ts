@@ -272,6 +272,46 @@ export async function onRequest(context: any): Promise<Response> {
     } catch (error) {
       report.pickerModels = { error: String(error).slice(0, 240) }
     }
+
+    // Workspace "files" panel flow: projects → workspaces → tree → write/read/delete.
+    try {
+      const g = `http://127.0.0.1:${sidecar.port}`
+      const projectsRes = await fetch(`${g}/api/machines/local/projects`, { signal: AbortSignal.timeout(5_000) })
+      const projectsJson: any = await projectsRes.json()
+      const projectList = Array.isArray(projectsJson) ? projectsJson : (Array.isArray(projectsJson?.projects) ? projectsJson.projects : [])
+      const fp: Record<string, any> = { projectsStatus: projectsRes.status, projects: projectList.map((p: any) => ({ id: p.id, name: p.name, path: p.path })) }
+      const pid = projectList[0]?.id
+      if (pid) {
+        const wsRes = await fetch(`${g}/api/machines/local/projects/${encodeURIComponent(pid)}/workspaces`, { signal: AbortSignal.timeout(5_000) })
+        const wsJson: any = await wsRes.json()
+        const wsList = Array.isArray(wsJson) ? wsJson : (Array.isArray(wsJson?.workspaces) ? wsJson.workspaces : [])
+        fp.workspaces = { status: wsRes.status, list: wsList.map((w: any) => ({ id: w.id, path: w.path, main: w.main })) }
+        const wid = wsList[0]?.id
+        if (wid) {
+          const treeRes = await fetch(`${g}/api/machines/local/projects/${encodeURIComponent(pid)}/workspaces/${encodeURIComponent(wid)}/tree?path=`, { signal: AbortSignal.timeout(5_000) })
+          fp.tree = { status: treeRes.status, body: (await treeRes.text()).slice(0, 500) }
+          try {
+            const probePath = '.pi-web-files-probe.txt'
+            const writeRes = await fetch(`${g}/api/machines/local/projects/${encodeURIComponent(pid)}/workspaces/${encodeURIComponent(wid)}/file?path=${encodeURIComponent(probePath)}&overwrite=true`, {
+              method: 'PUT',
+              headers: { 'content-type': 'text/plain' },
+              body: 'files-probe-ok\n',
+              signal: AbortSignal.timeout(5_000),
+            })
+            fp.write = { status: writeRes.status, body: (await writeRes.text()).slice(0, 200) }
+            const readRes = await fetch(`${g}/api/machines/local/projects/${encodeURIComponent(pid)}/workspaces/${encodeURIComponent(wid)}/file?path=${encodeURIComponent(probePath)}`, { signal: AbortSignal.timeout(5_000) })
+            fp.read = { status: readRes.status, body: (await readRes.text()).slice(0, 200) }
+            const delRes = await fetch(`${g}/api/machines/local/projects/${encodeURIComponent(pid)}/workspaces/${encodeURIComponent(wid)}/file?path=${encodeURIComponent(probePath)}`, { method: 'DELETE', signal: AbortSignal.timeout(5_000) })
+            fp.delete = { status: delRes.status }
+          } catch (error) {
+            fp.roundtrip = { error: String(error).slice(0, 200) }
+          }
+        }
+      }
+      report.filesProbe = fp
+    } catch (error) {
+      report.filesProbe = { error: String(error).slice(0, 240) }
+    }
   } catch (error) {
     report.sidecar = { status: 'FAILED', error: error instanceof Error ? error.message : String(error) }
   }

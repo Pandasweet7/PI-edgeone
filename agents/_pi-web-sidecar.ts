@@ -210,6 +210,7 @@ async function copyTree(src: string, dest: string): Promise<void> {
 const DEFAULT_PACKAGE_SOURCES = [
   'npm:pi-mcp-adapter@^2.26.0',
   'npm:pi-subagents@^0.50.0',
+  'npm:pi-web-access@^0.23.0',
 ]
 
 /**
