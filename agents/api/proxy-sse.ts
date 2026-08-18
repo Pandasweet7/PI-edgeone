@@ -21,15 +21,18 @@ function decodeTarget(raw: string): string {
   const decodeBase64 = (b64: string): string => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
     let out = ''
-    let i = 0
-    while (i < b64.length) {
-      const a = chars.indexOf(b64[i++] || '=')
-      const b = chars.indexOf(b64[i++] || '=')
-      const c = chars.indexOf(b64[i++] || '=')
-      const d = chars.indexOf(b64[i++] || '=')
-      out += String.fromCharCode((a << 2) | (b >> 4))
-      if (c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2))
-      if (d !== 64) out += String.fromCharCode(((c & 3) << 6) | d)
+    let buffer = 0
+    let bits = 0
+    for (const ch of b64) {
+      if (ch === '=') break // padding terminator
+      const val = chars.indexOf(ch)
+      if (val < 0) continue
+      buffer = (buffer << 6) | val
+      bits += 6
+      if (bits >= 8) {
+        bits -= 8
+        out += String.fromCharCode((buffer >> bits) & 0xff)
+      }
     }
     return out
   }
