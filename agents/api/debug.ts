@@ -168,6 +168,36 @@ export async function onRequest(context: any): Promise<Response> {
     } catch (error) {
       report.gatewayStatus = `probe failed: ${String(error).slice(0, 200)}`
     }
+    // Surface the session daemon's real model list — the exact `models` array
+    // the model picker renders from `listModels()`. This is what shows whether
+    // the NVIDIA provider's catalog is actually available to the picker.
+    try {
+      const g = `http://127.0.0.1:${sidecar.port}`
+      const ws = encodeURIComponent(join(sidecar.home, 'workspaces'))
+      const sessionsRes = await fetch(`${g}/api/machines/local/sessions?cwd=${ws}`, { signal: AbortSignal.timeout(5_000) })
+      const sessionsJson = await sessionsRes.json()
+      const list = Array.isArray(sessionsJson) ? sessionsJson : (Array.isArray(sessionsJson?.sessions) ? sessionsJson.sessions : [])
+      const sid = list[0]?.id
+      if (sid) {
+        const modelsRes = await fetch(`${g}/api/machines/local/sessions/${sid}/models?cwd=${ws}`, { signal: AbortSignal.timeout(8_000) })
+        const modelsJson = await modelsRes.json()
+        const models = Array.isArray(modelsJson) ? modelsJson : (Array.isArray(modelsJson?.models) ? modelsJson.models : [])
+        const nv = models.filter((m: any) => m?.provider === 'nvidia')
+        report.pickerModels = {
+          sessionId: sid,
+          total: models.length,
+          nvidia: nv.length,
+          providers: [...new Set(models.map((m: any) => m?.provider).filter(Boolean))],
+          sample: models.slice(0, 10).map((m: any) => `${m?.provider}/${m?.id}`),
+          nvidiaSample: nv.slice(0, 12).map((m: any) => m?.id),
+          raw: models.slice(0, 6),
+        }
+      } else {
+        report.pickerModels = { error: 'no session', sessions: list }
+      }
+    } catch (error) {
+      report.pickerModels = { error: String(error).slice(0, 240) }
+    }
   } catch (error) {
     report.sidecar = { status: 'FAILED', error: error instanceof Error ? error.message : String(error) }
   }
