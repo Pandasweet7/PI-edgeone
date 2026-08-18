@@ -175,12 +175,12 @@ export async function onRequest(context: any): Promise<Response> {
       const g = `http://127.0.0.1:${sidecar.port}`
       const ws = encodeURIComponent(join(sidecar.home, 'workspaces'))
       const sessionsRes = await fetch(`${g}/api/machines/local/sessions?cwd=${ws}`, { signal: AbortSignal.timeout(5_000) })
-      const sessionsJson = await sessionsRes.json()
+      const sessionsJson: any = await sessionsRes.json()
       const list = Array.isArray(sessionsJson) ? sessionsJson : (Array.isArray(sessionsJson?.sessions) ? sessionsJson.sessions : [])
       const sid = list[0]?.id
       if (sid) {
         const modelsRes = await fetch(`${g}/api/machines/local/sessions/${sid}/models?cwd=${ws}`, { signal: AbortSignal.timeout(8_000) })
-        const modelsJson = await modelsRes.json()
+        const modelsJson: any = await modelsRes.json()
         const models = Array.isArray(modelsJson) ? modelsJson : (Array.isArray(modelsJson?.models) ? modelsJson.models : [])
         const nv = models.filter((m: any) => m?.provider === 'nvidia')
         report.pickerModels = {
