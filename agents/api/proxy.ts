@@ -82,6 +82,11 @@ async function proxy(context: any): Promise<Response> {
 
   const forwardedHeaders: Record<string, string> = {
     accept: context.request?.headers?.accept || '*/*',
+    // Demand an uncompressed upstream response. Node's fetch negotiates gzip
+    // and decompresses the body, but the content-encoding header can leak
+    // through; forwarding a plain body with a gzip header kills every large
+    // response at the edge (ERR_SSL_PROTOCOL_ERROR / Failed to fetch).
+    'accept-encoding': 'identity',
   }
   const contentType = context.request?.headers?.['content-type']
   if (typeof contentType === 'string' && contentType !== '') forwardedHeaders['content-type'] = contentType
@@ -94,17 +99,19 @@ async function proxy(context: any): Promise<Response> {
     ...(body === undefined ? {} : { body }),
   })
 
-  const responseHeaders = new Headers(upstream.headers)
-  responseHeaders.delete('content-length')
-  responseHeaders.delete('transfer-encoding')
-  // Prevent CDN from caching dynamic responses (stale cached bodies can
-  // trigger ERR_SSL_PROTOCOL_ERROR when the CDN returns a response encrypted
-  // with a different SSL session).
+  // Build clean response headers instead of passing the gateway's through:
+  // hop-by-hop headers (connection/keep-alive), stale content-encoding and
+  // content-length from the upstream break delivery at the EdgeOne edge. The
+  // body is fully buffered below, so content-type is the only upstream header
+  // worth keeping.
+  const contentTypeHeader = upstream.headers.get('content-type') ?? 'application/octet-stream'
+  const responseHeaders = new Headers()
+  responseHeaders.set('content-type', contentTypeHeader)
+  // Prevent CDN from caching dynamic responses.
   responseHeaders.set('cache-control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   responseHeaders.set('pragma', 'no-cache')
   responseHeaders.set('expires', '0')
 
-  const contentTypeHeader = responseHeaders.get('content-type') ?? ''
   const isBinary = !contentTypeHeader.includes('json') && !contentTypeHeader.includes('text') && !contentTypeHeader.includes('event-stream')
   if (isBinary) responseHeaders.set('x-content-type-stream', 'true')
 
