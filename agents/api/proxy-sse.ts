@@ -16,10 +16,28 @@ const SSE_HEADERS = {
  * `encodeURIComponent` targets.
  */
 function decodeTarget(raw: string): string {
+  // Pure-JS base64 decoder: works in every JS runtime without depending on
+  // atob / Buffer — both of which may be unavailable in sandboxed runtimes.
+  const decodeBase64 = (b64: string): string => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    let out = ''
+    let i = 0
+    while (i < b64.length) {
+      const a = chars.indexOf(b64[i++] || '=')
+      const b = chars.indexOf(b64[i++] || '=')
+      const c = chars.indexOf(b64[i++] || '=')
+      const d = chars.indexOf(b64[i++] || '=')
+      out += String.fromCharCode((a << 2) | (b >> 4))
+      if (c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2))
+      if (d !== 64) out += String.fromCharCode(((c & 3) << 6) | d)
+    }
+    return out
+  }
+
   try {
     const b64 = raw.replace(/-/g, '+').replace(/_/g, '/')
     const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
-    const decoded = atob(padded)
+    const decoded = decodeBase64(padded)
     if (decoded.startsWith('api/') || decoded.startsWith('./api/')) return decoded
   } catch {
     // Fall through to URI decoding for legacy targets.

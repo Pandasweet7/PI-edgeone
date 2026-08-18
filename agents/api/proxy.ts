@@ -12,11 +12,29 @@ function requestPath(context: any): string {
  * older clients that still send `encodeURIComponent` targets.
  */
 function decodeTarget(raw: string): string {
+  // Pure-JS base64 decoder: works in every JS runtime without depending on
+  // atob / Buffer — both of which may be unavailable in sandboxed runtimes.
+  const decodeBase64 = (b64: string): string => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    let out = ''
+    let i = 0
+    while (i < b64.length) {
+      const a = chars.indexOf(b64[i++] || '=')
+      const b = chars.indexOf(b64[i++] || '=')
+      const c = chars.indexOf(b64[i++] || '=')
+      const d = chars.indexOf(b64[i++] || '=')
+      out += String.fromCharCode((a << 2) | (b >> 4))
+      if (c !== 64) out += String.fromCharCode(((b & 15) << 4) | (c >> 2))
+      if (d !== 64) out += String.fromCharCode(((c & 3) << 6) | d)
+    }
+    return out
+  }
+
   // New clients send base64url; try that first.
   try {
     const b64 = raw.replace(/-/g, '+').replace(/_/g, '/')
     const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
-    const decoded = atob(padded)
+    const decoded = decodeBase64(padded)
     if (decoded.startsWith('api/') || decoded.startsWith('./api/')) return decoded
   } catch {
     // Fall through to URI decoding for legacy targets.
@@ -71,7 +89,6 @@ async function proxy(context: any): Promise<Response> {
     method,
     headers: forwardedHeaders,
     ...(body === undefined ? {} : { body }),
-    signal: context.request?.signal,
   })
 
   const responseHeaders = new Headers(upstream.headers)
@@ -83,6 +100,7 @@ async function proxy(context: any): Promise<Response> {
   responseHeaders.set('cache-control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
   responseHeaders.set('pragma', 'no-cache')
   responseHeaders.set('expires', '0')
+
   const contentTypeHeader = responseHeaders.get('content-type') ?? ''
   const isBinary = !contentTypeHeader.includes('json') && !contentTypeHeader.includes('text') && !contentTypeHeader.includes('event-stream')
   if (isBinary) responseHeaders.set('x-content-type-stream', 'true')
