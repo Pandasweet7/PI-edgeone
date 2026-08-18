@@ -11,6 +11,7 @@ Run the [PI Coding Agent](https://pi.dev) with its official [PI WEB](https://pi-
 - **Makers Models** — the model picker lists the built-in `@makers/*` catalog through a local gateway adapter (`AI_GATEWAY_*` env).
 - **BYOK** — bring your own Anthropic / OpenAI / DeepSeek / … keys via **environment variables only**. Keys never enter the web UI, never touch the conversation store, and are not part of any snapshot.
 - **Cold-start persistence** — settings, session histories, and workspace text files are snapshotted into the conversation store and restored when the sandbox is reclaimed (Makers recycles idle instances after ~5 minutes).
+- **Access protection** — `middleware.js` gates the whole site behind HTTP Basic Auth (`SITE_USERNAME` / `SITE_PASSWORD` env); the browser handles the login prompt and re-sends credentials automatically on every request, including the SSE downlinks.
 - **Pi Packages** — install extensions/skills/prompts/themes from [pi.dev/packages](https://pi.dev/packages) in the UI or by template presets; missing packages are re-installed automatically after cold starts.
 
 ## Architecture
@@ -38,11 +39,12 @@ The PI WEB client is built from a fork of [jmfederico/pi-web](https://github.com
 
 1. Fork this repository (or click the Deploy button).
 2. In the Makers console set the environment variables (see `.env.example`):
+   - `SITE_USERNAME` / `SITE_PASSWORD` — HTTP Basic Auth credentials for the whole site (**required**, otherwise every request returns 401)
    - `AI_GATEWAY_API_KEY` — Makers Models API key (**required**)
    - `AI_GATEWAY_BASE_URL` — default `https://ai-gateway.edgeone.link/v1`
    - `AI_GATEWAY_MODEL` — default `@makers/deepseek-v4-flash`
    - any of the BYOK variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, …)
-3. Deploy. Open the site, create a project/workspace, start a session.
+3. Deploy. Open the site (the browser prompts for the Basic Auth login), create a project/workspace, start a session.
 
 ## Local development
 
@@ -65,10 +67,14 @@ node --experimental-strip-types scripts/smoke-test.mjs
 
 | Variable | Required | Description |
 |---|---|---|
+| `SITE_USERNAME` | Yes* | HTTP Basic Auth username (gates the whole site via `middleware.js`) |
+| `SITE_PASSWORD` | Yes* | HTTP Basic Auth password. If either is unset, every request is 401 |
 | `AI_GATEWAY_API_KEY` | Yes | Makers Models key, or any OpenAI-compatible key |
 | `AI_GATEWAY_BASE_URL` | No | Gateway base URL (`https://ai-gateway.edgeone.link/v1`) |
 | `AI_GATEWAY_MODEL` | No | Default model (`@makers/deepseek-v4-flash`) |
 | `ANTHROPIC_API_KEY` … | No | BYOK keys, see `.env.example` for the full list |
+
+\* `SITE_USERNAME`/`SITE_PASSWORD` are only required to enable login protection. To run the site fully open (e.g. behind EdgeOne's own access control), delete `middleware.js`.
 
 ## Installing Pi Packages (extensions from pi.dev/packages)
 
@@ -133,7 +139,7 @@ Pre-configure `~/.pi/agent/settings.json` with the desired `packages` array in `
 | Data | Persisted across cold starts |
 |---|---|
 | `~/.pi/agent/settings.json` (incl. package list, model config) | ✅ |
-| `~/.pi/agent/models.json` (custom providers) | ✅ |
+| `~/.pi/agent/models.json` (custom providers) | ❌ (rebuilt every boot with the current local gateway port — see _pi-web-sidecar.ts) |
 | `~/.pi/agent/sessions/*.jsonl` (session histories) | ✅ |
 | workspace text files (≤ 120 files, ≤ 512 KB each) | ✅ |
 | `~/.pi-web/config.json` | ✅ |
@@ -141,10 +147,22 @@ Pre-configure `~/.pi/agent/settings.json` with the desired `packages` array in `
 | installed package code (`npm/`, `git/`) | ❌ (auto re-installed from `settings.json` + `vendor/pi-packages` on cold start) |
 | large / binary workspace files | ❌ (size-bounded snapshot) |
 
+## Access protection (HTTP Basic Auth)
+
+[`middleware.js`](middleware.js) is an EdgeOne Functions middleware (auto-loaded from the project root, next to `edgeone.json`) that gates every matched route — the SPA, static assets, and all `/api/*` agents routes — behind HTTP Basic Auth.
+
+How it works in practice:
+
+- The browser shows its **native login dialog** on the first visit. After the user enters the credentials, the browser caches them and **automatically attaches `Authorization: Basic …`** to every subsequent same-origin request — including the SSE downlinks (`/api/proxy-sse`). No client-side change is needed.
+- Credentials are read from `SITE_USERNAME` / `SITE_PASSWORD` (deployment environment). They are **not** stored in the conversation store or the browser beyond the browser's own Basic-Auth credential cache.
+- If either variable is empty/unset, **every request** is rejected with `401` (the middleware treats `undefined !== <input>` as a mismatch). Configure both before deploying.
+- To disable site-wide auth (e.g. if you prefer EdgeOne's console-level access control), just delete `middleware.js` — there is no code that depends on it.
+
 ## Security notes
 
+- `middleware.js` + `SITE_USERNAME`/`SITE_PASSWORD` protect the **UI surface** and the **agents HTTP routes**. They do NOT authenticate the model backend itself (that is `AI_GATEWAY_API_KEY`).
 - BYOK keys are deployment secrets: they exist only in the environment, are forwarded to the sidecar processes, and never enter the conversation store or the browser.
-- PI WEB has no multi-tenant auth of its own: isolation granularity is the Makers conversation. Do not expose the deployment to untrusted users without a gateway.
+- PI WEB has no multi-tenant auth of its own: isolation granularity is the Makers conversation. With `middleware.js` in place every visitor must know the shared Basic Auth credentials; per-user identity is still not modeled.
 - Pi Packages execute arbitrary code. Review sources before installing.
 
 ## License
