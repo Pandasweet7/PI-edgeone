@@ -179,11 +179,12 @@ export async function onRequest(context: any): Promise<Response> {
       const list = Array.isArray(sessionsJson) ? sessionsJson : (Array.isArray(sessionsJson?.sessions) ? sessionsJson.sessions : [])
       const sid = list[0]?.id
       if (sid) {
+        // Direct gateway query (same as what the proxy forwards to)
         const modelsRes = await fetch(`${g}/api/machines/local/sessions/${sid}/models?cwd=${ws}`, { signal: AbortSignal.timeout(8_000) })
         const modelsJson: any = await modelsRes.json()
         const models = Array.isArray(modelsJson) ? modelsJson : (Array.isArray(modelsJson?.models) ? modelsJson.models : [])
         const nv = models.filter((m: any) => m?.provider === 'nvidia')
-        report.pickerModels = {
+        const pm: Record<string, any> = {
           sessionId: sid,
           total: models.length,
           nvidia: nv.length,
@@ -192,6 +193,30 @@ export async function onRequest(context: any): Promise<Response> {
           nvidiaSample: nv.slice(0, 12).map((m: any) => m?.id),
           raw: models.slice(0, 6),
         }
+        // Check if the session is model-scoped — scoped sessions restrict the
+        // picker to only show the scoped models, which would explain an empty
+        // or very short list.
+        try {
+          const statusRes = await fetch(`${g}/api/machines/local/sessions/${sid}/status?cwd=${ws}`, { signal: AbortSignal.timeout(5_000) })
+          const statusJson: any = await statusRes.json()
+          const scoped = statusJson?.scopedModels ?? statusJson?.session?.scopedModels
+          pm.sessionScoped = Array.isArray(scoped) && scoped.length > 0 ? scoped.map((s: any) => `${s.model?.provider}/${s.model?.id}`) : false
+        } catch (error) {
+          pm.sessionScoped = `probe error: ${String(error).slice(0, 120)}`
+        }
+        // List all sessions so we can see if the user's session is different
+        // from the first one we query.
+        try {
+          const allSessions = await Promise.all(list.slice(0, 5).map(async (s: any) => {
+            const sr = await fetch(`${g}/api/machines/local/sessions/${s.id}/status?cwd=${ws}`, { signal: AbortSignal.timeout(5_000) })
+            const sj: any = await sr.json()
+            const sc = Array.isArray(sj?.scopedModels) ? sj.scopedModels.length : 0
+            const model = sj?.model ? `${sj.model.provider}/${sj.model.id}` : '(none)'
+            return { id: s.id, model, scopedCount: sc }
+          })).catch(() => [{ error: 'failed to list sessions' }])
+          pm.allSessions = allSessions
+        } catch { /* ignore */ }
+        report.pickerModels = pm
       } else {
         report.pickerModels = { error: 'no session', sessions: list }
       }
