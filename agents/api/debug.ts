@@ -73,7 +73,9 @@ export async function onRequest(context: any): Promise<Response> {
     homesDu: (() => { try { return execFileSync('du', ['-sh', '/tmp/piweb-makers', '/tmp/npm-cache'], { timeout: 10_000 }).toString().trim() } catch { return '(du unavailable)' } })(),
   }
 
-  const conversationId = context?.conversation_id ?? 'debug'
+  const conversationId = String(context?.conversation_id ?? context?.request?.query?.conversation ?? '').trim()
+    || String(context?.request?.query?.cid ?? '').trim()
+    || `debug-${Math.random().toString(36).slice(2, 10)}`
   const aiGatewayProbe: Record<string, unknown> = {}
   {
     const baseUrl = String(context?.env?.AI_GATEWAY_BASE_URL ?? '').replace(/\/+$/, '')
