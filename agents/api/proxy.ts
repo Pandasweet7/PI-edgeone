@@ -25,7 +25,13 @@ async function proxy(context: any): Promise<Response> {
     return Response.json({ error: 'Invalid proxy target' }, { status: 400 })
   }
 
-  const upstreamUrl = new URL(target, `http://127.0.0.1:${String(sidecar.port)}`).toString()
+  const upstreamUrl = new URL(target, `http://127.0.0.1:${String(sidecar.port)}`)
+  // Cache-bust: CDN-level caching of the upstream URL (even with cache-control
+  // headers on the response) can cause ERR_SSL_PROTOCOL_ERROR when the cached
+  // body is served to a different SSL session. A unique timestamp per request
+  // bypasses the CDN cache entirely.
+  upstreamUrl.searchParams.set('_t', String(Date.now()))
+  const urlStr = upstreamUrl.toString()
   const method = String(context.request?.method || 'GET').toUpperCase()
 
   const forwardedHeaders: Record<string, string> = {
@@ -46,6 +52,12 @@ async function proxy(context: any): Promise<Response> {
   const responseHeaders = new Headers(upstream.headers)
   responseHeaders.delete('content-length')
   responseHeaders.delete('transfer-encoding')
+  // Prevent CDN from caching dynamic responses (stale cached bodies can
+  // trigger ERR_SSL_PROTOCOL_ERROR when the CDN returns a response encrypted
+  // with a different SSL session).
+  responseHeaders.set('cache-control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+  responseHeaders.set('pragma', 'no-cache')
+  responseHeaders.set('expires', '0')
   const contentTypeHeader = responseHeaders.get('content-type') ?? ''
   const isBinary = !contentTypeHeader.includes('json') && !contentTypeHeader.includes('text') && !contentTypeHeader.includes('event-stream')
   if (isBinary) responseHeaders.set('x-content-type-stream', 'true')
