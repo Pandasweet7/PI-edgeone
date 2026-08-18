@@ -9,6 +9,30 @@ const SSE_HEADERS = {
 }
 
 /**
+ * Decode a base64url-encoded proxy target (same as the REST proxy). The client
+ * encodes every API path with `encodeProxyTarget` (base64url) to avoid the
+ * EdgeOne CDN's %2F-in-query handling, which breaks the SSL/TLS session.
+ * Falls back to URI decoding for older clients that still send
+ * `encodeURIComponent` targets.
+ */
+function decodeTarget(raw: string): string {
+  try {
+    const b64 = raw.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+    const decoded = atob(padded)
+    if (decoded.startsWith('api/') || decoded.startsWith('./api/')) return decoded
+  } catch {
+    // Fall through to URI decoding for legacy targets.
+  }
+  try {
+    const decoded = decodeURIComponent(raw)
+    return decoded.startsWith('./') ? decoded.slice(2) : decoded
+  } catch {
+    return raw
+  }
+}
+
+/**
  * EventSource endpoint for the PI WEB client event downlinks
  * (session events / global events). The Makers runtime carries server-sent
  * events but not WebSockets, so this route opens a WebSocket to the local
@@ -17,7 +41,7 @@ const SSE_HEADERS = {
  */
 function eventStream(context: any): Response {
   const query = context.request?.query ?? {}
-  const target = typeof query.target === 'string' ? decodeURIComponent(query.target) : ''
+  const target = typeof query.target === 'string' ? decodeTarget(query.target) : ''
   const conversationFromQuery = typeof query.conversation === 'string' ? query.conversation : ''
   const conversationId = conversationFromQuery || String(context.conversation_id || '').trim()
   if (!conversationId || !target.startsWith('api/') || target.startsWith('api/proxy')) {

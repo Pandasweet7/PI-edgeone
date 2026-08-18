@@ -6,6 +6,31 @@ function requestPath(context: any): string {
 }
 
 /**
+ * Decode a base64url-encoded proxy target. The client encodes every API path
+ * with `encodeProxyTarget` (base64url) to avoid the EdgeOne CDN's %2F-in-query
+ * handling, which breaks the SSL/TLS session. Falls back to URI decoding for
+ * older clients that still send `encodeURIComponent` targets.
+ */
+function decodeTarget(raw: string): string {
+  // New clients send base64url; try that first.
+  try {
+    const b64 = raw.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+    const decoded = atob(padded)
+    if (decoded.startsWith('api/') || decoded.startsWith('./api/')) return decoded
+  } catch {
+    // Fall through to URI decoding for legacy targets.
+  }
+  // Legacy clients send encodeURIComponent(path) targets.
+  try {
+    const decoded = decodeURIComponent(raw)
+    return decoded.startsWith('./') ? decoded.slice(2) : decoded
+  } catch {
+    return raw
+  }
+}
+
+/**
  * PI WEB client (EdgeOne Makers build) folds every application-relative API
  * path onto this single route: `api/proxy?target=<original api/... path>`.
  * The original HTTP method, headers, and parsed JSON body are preserved, and
@@ -20,7 +45,7 @@ async function proxy(context: any): Promise<Response> {
   const sidecar = await getPiWebSidecar(context)
 
   const query = context.request?.query ?? {}
-  const target = typeof query.target === 'string' ? decodeURIComponent(query.target) : ''
+  const target = typeof query.target === 'string' ? decodeTarget(query.target) : ''
   if (!target.startsWith('api/') || target.startsWith('api/proxy')) {
     return Response.json({ error: 'Invalid proxy target' }, { status: 400 })
   }
