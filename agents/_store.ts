@@ -40,6 +40,13 @@ const IGNORED_FILES = new Set(['.DS_Store'])
 export interface PiWebSnapshot {
   version: typeof SNAPSHOT_VERSION
   configJson: string | null
+  /**
+   * $PI_WEB_DATA_DIR/projects.json — the project/workspace registry. Without
+   * it a cold-started gateway knows no projects/workspaces: the UI's stored
+   * workspace ids 404, the session list for the workspace comes back empty,
+   * and the model picker has no session to query.
+   */
+  projectsJson: string | null
   agentSettings: string | null
   agentModels: string | null
   sessions: Record<string, string>
@@ -47,7 +54,7 @@ export interface PiWebSnapshot {
 }
 
 export function emptySnapshot(): PiWebSnapshot {
-  return { version: SNAPSHOT_VERSION, configJson: null, agentSettings: null, agentModels: null, sessions: {}, workspace: {} }
+  return { version: SNAPSHOT_VERSION, configJson: null, projectsJson: null, agentSettings: null, agentModels: null, sessions: {}, workspace: {} }
 }
 
 export function snapshotByteSize(snapshot: PiWebSnapshot): number {
@@ -103,6 +110,7 @@ async function collectTextFiles(root: string, maxFiles: number, maxBytesPerFile:
 export async function captureSnapshot(home: string): Promise<PiWebSnapshot> {
   const snapshot = emptySnapshot()
   snapshot.configJson = await readOptionalFile(join(home, 'pi-web', 'config.json'))
+  snapshot.projectsJson = await readOptionalFile(join(home, 'projects.json'))
   snapshot.agentSettings = await readOptionalFile(join(home, 'pi-agent', 'settings.json'))
   // models.json is intentionally NOT snapshotted: its edgeone-makers provider
   // carries the local gateway proxy's port, which is freshly assigned on every
@@ -173,6 +181,7 @@ function normalizeSnapshot(raw: Partial<PiWebSnapshot>): PiWebSnapshot {
   const snapshot = emptySnapshot()
   if (raw.version === SNAPSHOT_VERSION) {
     snapshot.configJson = typeof raw.configJson === 'string' ? raw.configJson : null
+    snapshot.projectsJson = typeof raw.projectsJson === 'string' ? raw.projectsJson : null
     snapshot.agentSettings = typeof raw.agentSettings === 'string' ? raw.agentSettings : null
     snapshot.agentModels = typeof raw.agentModels === 'string' ? raw.agentModels : null
     if (raw.sessions !== null && typeof raw.sessions === 'object' && !Array.isArray(raw.sessions)) {
@@ -193,6 +202,7 @@ function normalizeSnapshot(raw: Partial<PiWebSnapshot>): PiWebSnapshot {
 export async function restoreSnapshot(home: string, snapshot: PiWebSnapshot): Promise<void> {
   await mkdir(home, { recursive: true })
   await writeMaybe(join(home, 'pi-web', 'config.json'), snapshot.configJson)
+  await writeMaybe(join(home, 'projects.json'), snapshot.projectsJson)
   await writeMaybe(join(home, 'pi-agent', 'settings.json'), snapshot.agentSettings)
   // models.json is rebuilt with the current gateway proxy port at sidecar
   // startup; do not restore a possibly stale one from an older snapshot.

@@ -76,6 +76,53 @@ export async function onRequest(context: any): Promise<Response> {
   const conversationId = String(context?.conversation_id ?? context?.request?.query?.conversation ?? '').trim()
     || String(context?.request?.query?.cid ?? '').trim()
     || `debug-${Math.random().toString(36).slice(2, 10)}`
+
+  // --- Conversation-store diagnostics -------------------------------------
+  // The snapshot persistence (agents/_store.ts) silently no-ops when
+  // context.store is absent. Probe it explicitly so a broken store is
+  // visible instead of masquerading as "sessions disappear after restart".
+  const storeProbe: Record<string, unknown> = { available: Boolean(context?.store) }
+  if (context?.store) {
+    const probeKey = 'piWebStoreProbe'
+    const probeValue = `probe-${Date.now()}`
+    try {
+      const { SNAPSHOT_METADATA_KEY } = await import('../_store.ts')
+      let conversation: any
+      try { conversation = await context.store.getConversation({ conversationId }) }
+      catch { conversation = await context.store.getConversation(conversationId) }
+      storeProbe.conversationFound = Boolean(conversation)
+      const metadata = conversation?.metadata ?? {}
+      storeProbe.snapshotPresent = metadata?.[SNAPSHOT_METADATA_KEY] !== undefined
+      const snap = metadata?.[SNAPSHOT_METADATA_KEY]
+      if (snap && typeof snap === 'object') {
+        storeProbe.snapshotKeys = Object.keys(snap)
+        storeProbe.snapshotSessionCount = snap.sessions && typeof snap.sessions === 'object' ? Object.keys(snap.sessions).length : 0
+        storeProbe.snapshotHasProjectsJson = typeof snap.projectsJson === 'string' && snap.projectsJson.length > 0
+        storeProbe.snapshotWorkspaceFiles = snap.workspace && typeof snap.workspace === 'object' ? Object.keys(snap.workspace).length : 0
+      }
+      // Round-trip write/read test.
+      try {
+        await context.store.updateConversation({ conversationId, metadata: { ...metadata, [probeKey]: probeValue } })
+      } catch {
+        await context.store.updateConversation(conversationId, { metadata: { ...metadata, [probeKey]: probeValue } })
+      }
+      let reread: any
+      try { reread = await context.store.getConversation({ conversationId }) }
+      catch { reread = await context.store.getConversation(conversationId) }
+      storeProbe.writeReadRoundtrip = reread?.metadata?.[probeKey] === probeValue ? 'OK' : 'FAILED'
+      // Clean up the probe key.
+      try {
+        const cleaned = { ...metadata }
+        delete cleaned[probeKey]
+        try { await context.store.updateConversation({ conversationId, metadata: cleaned }) }
+        catch { await context.store.updateConversation(conversationId, { metadata: cleaned }) }
+      } catch { /* best effort */ }
+    } catch (error) {
+      storeProbe.error = String(error).slice(0, 300)
+    }
+  }
+  report.conversationStore = storeProbe
+  // ------------------------------------------------------------------------
   const aiGatewayProbe: Record<string, unknown> = {}
   {
     const baseUrl = String(context?.env?.AI_GATEWAY_BASE_URL ?? '').replace(/\/+$/, '')
@@ -232,6 +279,13 @@ export async function onRequest(context: any): Promise<Response> {
   report.fs = fsProbe
 
   const home = piWebHomeFor(conversationId)
+  report.persistenceFs = {
+    homeExists: existsSync(home),
+    homeTop: lsSafe(home),
+    projectsJson: tailLog(join(home, 'projects.json'), 2_000),
+    sessionsDir: lsSafe(join(home, 'pi-agent', 'sessions')).slice(0, 12),
+    workspaceDir: lsSafe(join(home, 'workspaces')).slice(0, 12),
+  }
   report.logs = {
     sessiond: tailLog(join(home, 'pi-web', 'logs', 'sessiond.log')),
     gateway: tailLog(join(home, 'pi-web', 'logs', 'gateway.log')),
