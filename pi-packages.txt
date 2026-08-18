@@ -17,5 +17,5 @@
 #     code is re-installed online by `_packages.ts` on cold start (npm cache is
 #     shared at /tmp/npm-cache to keep the space cost low).
 
-npm:pi-mcp-adapter@^2.26.0
-npm:pi-subagents@^0.50.0
+npm:pi-web-access
+npm:pi-subagents
