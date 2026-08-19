@@ -26,7 +26,11 @@ export const SNAPSHOT_VERSION = 1
 // Conservative ceiling for a conversation metadata payload. The store is a
 // conversation memory; keep the snapshot well under typical limits and degrade
 // gracefully (drop workspace files first, then old sessions) when exceeded.
-const SNAPSHOT_MAX_BYTES = 512 * 1024
+const SNAPSHOT_MAX_BYTES = 1.5 * 1024 * 1024
+// A single session transcript can grow very large (reasoning + tool calls).
+// Store only the newest tail so one big session can never evict every other
+// session. The tail is kept at a JSONL line boundary so it stays parseable.
+const MAX_SESSION_BYTES = 384 * 1024
 const MAX_WORKSPACE_FILE_BYTES = 512 * 1024
 const MAX_WORKSPACE_FILES = 120
 const MAX_SESSIONS = 24
@@ -125,7 +129,7 @@ export async function captureSnapshot(home: string): Promise<PiWebSnapshot> {
   dated.sort((a, b) => b.mtime - a.mtime)
   for (const item of dated.slice(0, MAX_SESSIONS)) {
     const content = await readOptionalFile(item.path)
-    if (content !== null) snapshot.sessions[item.name] = content
+    if (content !== null) snapshot.sessions[item.name] = tailJsonl(content, MAX_SESSION_BYTES)
   }
 
   snapshot.workspace = await collectTextFiles(join(home, 'workspaces'), MAX_WORKSPACE_FILES, MAX_WORKSPACE_FILE_BYTES)
@@ -138,13 +142,30 @@ export function trimSnapshot(snapshot: PiWebSnapshot): PiWebSnapshot {
   const trimmed = { ...snapshot, workspace: {} }
   if (snapshotByteSize(trimmed) <= SNAPSHOT_MAX_BYTES) return trimmed
   const sessions = { ...snapshot.sessions }
-  while (snapshotByteSize({ ...trimmed, sessions }) > SNAPSHOT_MAX_BYTES && Object.keys(sessions).length > 0) {
-    // Drop the largest session first to converge fast.
-    const largest = Object.keys(sessions).sort((a, b) => sessions[b]!.length - sessions[a]!.length)[0]
-    if (largest === undefined) break
-    delete sessions[largest]
+  // Drop the OLDEST sessions first so the most recent conversation always
+  // survives, even when the snapshot is over budget. Session file names embed
+  // an ISO timestamp; fall back to comparing full paths when unparseable.
+  const byAge = Object.keys(sessions).sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)))
+  for (const oldest of byAge) {
+    if (snapshotByteSize({ ...trimmed, sessions }) <= SNAPSHOT_MAX_BYTES) break
+    delete sessions[oldest]
   }
   return { ...trimmed, sessions }
+}
+
+/** Extract a sortable creation timestamp from a session file name (e.g. ``2026-08-19T07-08-57-961Z_id.jsonl``). */
+function sessionSortKey(name: string): string {
+  const match = /(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)/.exec(name)
+  return match ? match[1] : name
+}
+
+/** Keep the newest tail of a JSONL transcript at a line boundary so it stays parseable. */
+function tailJsonl(content: string, maxBytes: number): string {
+  if (content.length <= maxBytes) return content
+  const start = content.length - maxBytes
+  const nl = content.indexOf('\n', start)
+  if (nl === -1 || nl === content.length - 1) return content.slice(start)
+  return content.slice(nl + 1)
 }
 
 /** Write a snapshot into the conversation store (merge semantics on metadata). */

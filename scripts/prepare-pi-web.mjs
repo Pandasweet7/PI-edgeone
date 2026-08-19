@@ -29,9 +29,17 @@ const makersBootstrapScript = `(() => {
   const key = 'makers-web-conversation-id';
   let conversationId = localStorage.getItem(key);
   if (!conversationId) {
-    conversationId = crypto.randomUUID();
-    localStorage.setItem(key, conversationId);
+    const m = document.cookie.match(/(?:^|; )makers-web-conversation-id=([^;]*)/);
+    if (m && m[1]) conversationId = decodeURIComponent(m[1]);
   }
+  if (!conversationId) {
+    conversationId = crypto.randomUUID();
+  }
+  // Persist in BOTH localStorage and a cookie so that losing one (e.g. the
+  // browser clearing localStorage but keeping cookies) never strands the
+  // persisted workspace/sessions in a different, unreachable conversation.
+  try { localStorage.setItem(key, conversationId); } catch { /* private mode */ }
+  try { document.cookie = key + '=' + encodeURIComponent(conversationId) + '; path=/; max-age=31536000; SameSite=Lax'; } catch { /* ignore */ }
   window.__MAKERS_CONVERSATION_ID__ = conversationId;
   const nativeFetch = window.fetch.bind(window);
   window.fetch = (input, init = {}) => {
