@@ -198,6 +198,17 @@ export async function readSnapshotFromStore(context: any, conversationId: string
   }
 }
 
+/** True when a snapshot carries no user state worth migrating/restoring. */
+export function isSnapshotEmpty(snapshot: PiWebSnapshot): boolean {
+  return (
+    snapshot.projectsJson === null &&
+    snapshot.agentSettings === null &&
+    snapshot.configJson === null &&
+    Object.keys(snapshot.sessions).length === 0 &&
+    Object.keys(snapshot.workspace).length === 0
+  )
+}
+
 function normalizeSnapshot(raw: Partial<PiWebSnapshot>): PiWebSnapshot {
   const snapshot = emptySnapshot()
   if (raw.version === SNAPSHOT_VERSION) {

@@ -46,9 +46,14 @@ export async function middleware(context) {
     // strand every browser in its own isolated, empty conversation — the exact
     // symptom "switch browser and the dialogue is gone".
     const stableId = stableConversationId(username, env);
+    // Keep the browser's original id around so the agent can migrate that
+    // browser's previously-persisted state into the unified conversation on
+    // first boot (a one-time, best-effort migration).
+    const originalId = request.headers.get('makers-conversation-id') || '';
     return next({
       headers: {
         'makers-conversation-id': stableId,
+        'x-makers-original-conversation-id': originalId,
         authorization: auth,
       },
     });

@@ -8,7 +8,7 @@ import { createServer } from 'node:net'
 import { dirname, join } from 'node:path'
 import { startLocalGatewayProxy, type LocalGatewayProxy } from './_gateway-proxy.ts'
 import { reinstallMissingPackages } from './_packages.ts'
-import { captureSnapshot, readSnapshotFromStore, restoreSnapshot, writeSnapshotToStore, type PiWebSnapshot } from './_store.ts'
+import { captureSnapshot, isSnapshotEmpty, readSnapshotFromStore, restoreSnapshot, writeSnapshotToStore, type PiWebSnapshot } from './_store.ts'
 
 // Side-effect import of the vendored package name: EdgeOne's agent dependency
 // sync only ships packages reachable through the import graph. The marker main
@@ -294,7 +294,22 @@ async function startSidecar(context: any, conversationId: string): Promise<PiWeb
 
   await mkdir(home, { recursive: true })
   // Restore persisted state (settings, sessions, workspace) before booting.
-  const snapshot = await readSnapshotFromStore(context, conversationId)
+  let snapshot = await readSnapshotFromStore(context, conversationId)
+  // One-time migration: the middleware now pins every browser to a stable
+  // conversation id (hash of the authenticated user). If this stable
+  // conversation is still empty, carry over the state this browser had stored
+  // under its old random makers-conversation-id so the user's prior dialogue
+  // is not stranded. (Open the browser that has the old dialogue first.)
+  if (isSnapshotEmpty(snapshot)) {
+    const originalId = String(context?.request?.headers?.['x-makers-original-conversation-id'] ?? '').trim()
+    if (originalId !== '' && originalId !== conversationId) {
+      const original = await readSnapshotFromStore(context, originalId)
+      if (!isSnapshotEmpty(original)) {
+        snapshot = original
+        try { await writeSnapshotToStore(context, conversationId, original) } catch { /* best effort */ }
+      }
+    }
+  }
   await restoreSnapshot(home, snapshot)
 
   // Seed the pre-installed Pi Packages vendored into this template
