@@ -18,6 +18,17 @@ function jsonResponse(data: unknown, status = 200): Response {
   })
 }
 
+/** Mirror of middleware.js stableConversationId for verification. */
+function fnv1aStableId(seed: string): string {
+  const source = seed || 'pi-web-makers'
+  let h = 0x811c9dc5
+  for (let i = 0; i < source.length; i++) {
+    h ^= source.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return 'u' + (h >>> 0).toString(16).padStart(8, '0')
+}
+
 function tailLog(path: string, bytes = 3_000): string {
   try {
     const raw = readFileSync(path, 'utf8')
@@ -47,6 +58,12 @@ export async function onRequest(context: any): Promise<Response> {
     platform: process.platform,
     arch: process.arch,
     cwd: process.cwd(),
+    // Whether the middleware's stable conversation-id rewrite propagated.
+    // After the fix these two should be equal; before they differ (browser id).
+    conversationIdentity: {
+      makersContextConversationId: String(context?.conversation_id ?? '(none)'),
+      expectedStableId: fnv1aStableId(String(context?.env?.SITE_USERNAME ?? '')),
+    },
     envProbe: {
       AI_GATEWAY_API_KEY: context?.env?.AI_GATEWAY_API_KEY ? '(set)' : '(missing)',
       AI_GATEWAY_BASE_URL: context?.env?.AI_GATEWAY_BASE_URL ?? '(missing)',

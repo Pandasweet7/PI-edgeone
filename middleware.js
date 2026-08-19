@@ -39,10 +39,42 @@ export async function middleware(context) {
       return unauthorized();
     }
 
-    return next();
+    // Derive a stable conversation id from the authenticated identity so that
+    // ALL browsers/devices logging in as the same user share ONE persistent
+    // workspace/sessions. The browser's own makers-web-conversation-id (a
+    // random UUID held in that browser's localStorage/cookie) would otherwise
+    // strand every browser in its own isolated, empty conversation — the exact
+    // symptom "switch browser and the dialogue is gone".
+    const stableId = stableConversationId(username, env);
+    return next({
+      headers: {
+        'makers-conversation-id': stableId,
+        authorization: auth,
+      },
+    });
   } catch {
     return unauthorized();
   }
+}
+
+/**
+ * FNV-1a 32-bit hash of a stable per-deployment identity → hex → a valid
+ * makers-conversation-id (6-36 chars, [0-9a-zA-Z-_.]). Deterministic for a
+ * given username, so every request from the same user converges on one
+ * conversation regardless of browser or device.
+ */
+function stableConversationId(username, env) {
+  const seed =
+    username ||
+    env.SITE_USERNAME ||
+    env.AI_GATEWAY_API_KEY ||
+    'pi-web-makers';
+  let h = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return 'u' + (h >>> 0).toString(16).padStart(8, '0');
 }
 
 function unauthorized() {
