@@ -75,6 +75,28 @@
     if (input instanceof Request) return nativeFetch(new Request(input, { ...init, headers }));
     return nativeFetch(input, { ...init, headers });
   };
+
+  // XHR wrapper: pi-web's workspace file upload uses XMLHttpRequest, and the
+  // Makers platform requires makers-conversation-id on every /api call.
+  const nativeOpen = XMLHttpRequest.prototype.open;
+  const nativeSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+  const nativeSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    try { this.__piWebConversationUrl = typeof url === 'string' ? new URL(url, location.href) : null; }
+    catch { this.__piWebConversationUrl = null; }
+    return nativeOpen.call(this, method, url, ...rest);
+  };
+  XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+    if (String(name).toLowerCase() === 'makers-conversation-id') return;
+    return nativeSetHeader.call(this, name, value);
+  };
+  XMLHttpRequest.prototype.send = function (...args) {
+    const url = this.__piWebConversationUrl;
+    if (url && url.origin === location.origin && url.pathname.startsWith('/api')) {
+      try { nativeSetHeader.call(this, 'makers-conversation-id', conversationId); } catch { /* ignore */ }
+    }
+    return nativeSend.apply(this, args);
+  };
 })();</script>
 </head>
   <body>
