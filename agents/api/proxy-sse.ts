@@ -63,8 +63,14 @@ function decodeTarget(raw: string): string {
 function eventStream(context: any): Response {
   const query = context.request?.query ?? {}
   const target = typeof query.target === 'string' ? decodeTarget(query.target) : ''
-  const conversationFromQuery = typeof query.conversation === 'string' ? query.conversation : ''
-  const conversationId = conversationFromQuery || String(context.conversation_id || '').trim()
+  // Prefer the server-assigned conversation id (the middleware rewrites
+  // makers-conversation-id to a stable per-user id). The client's `conversation`
+  // query param still carries the browser's original random id, which must NOT
+  // be used to key the sidecar — otherwise this SSE route would open a
+  // DIFFERENT (empty) sidecar than the REST proxy and stream nothing, so the
+  // whole dialogue only appears once the agent finishes.
+  const conversationId = String(context.conversation_id || '').trim()
+    || (typeof query.conversation === 'string' ? query.conversation : '')
   if (!conversationId || !target.startsWith('api/') || target.startsWith('api/proxy')) {
     return Response.json({ error: 'Invalid SSE target or missing conversation id' }, { status: 400 })
   }

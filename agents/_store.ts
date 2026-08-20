@@ -87,7 +87,11 @@ async function collectTextFiles(root: string, maxFiles: number, maxBytesPerFile:
     }
     for (const entry of entries) {
       if (Object.keys(files).length >= maxFiles) return
-      if (entry.name.startsWith('.') || IGNORED_DIRECTORIES.has(entry.name) || IGNORED_FILES.has(entry.name)) continue
+      // Skip runtime dot-dirs/ignored dirs, EXCEPT the web-upload folder which
+      // lives under .pi-web/uploads and must be persisted.
+      const isDot = entry.name.startsWith('.')
+      const isUploadsDir = entry.isDirectory() && entry.name === '.pi-web' && dir === root
+      if ((isDot && !isUploadsDir) || IGNORED_DIRECTORIES.has(entry.name) || IGNORED_FILES.has(entry.name)) continue
       const full = join(dir, entry.name)
       if (entry.isDirectory()) {
         await walk(full)
@@ -97,10 +101,10 @@ async function collectTextFiles(root: string, maxFiles: number, maxBytesPerFile:
       try {
         const info = await stat(full)
         if (info.size > maxBytesPerFile) continue
-        const content = await readFile(full, 'utf8')
-        // Reject binary files: valid text has no NUL bytes in practice.
-        if (content.includes('\0')) continue
-        files[relative(root, full).split(sep).join('/')] = content
+        const buf = await readFile(full)
+        // Binary files (NUL bytes) are stored base64-prefixed so they survive
+        // the JSON snapshot; text stays raw.
+        files[relative(root, full).split(sep).join('/')] = buf.includes(0) ? `!!bin!!${buf.toString('base64')}` : buf.toString('utf8')
       } catch {
         // Skip unreadable files (permissions, races).
       }
@@ -248,7 +252,11 @@ export async function restoreSnapshot(home: string, snapshot: PiWebSnapshot): Pr
     if (typeof content !== 'string') continue
     const target = join(home, 'workspaces', relPath)
     await mkdir(join(target, '..'), { recursive: true })
-    await writeFile(target, content)
+    if (content.startsWith('!!bin!!')) {
+      await writeFile(target, Buffer.from(content.slice(7), 'base64'))
+    } else {
+      await writeFile(target, content)
+    }
   }
   // Always ensure the conventional folders exist for a fresh start.
   await mkdir(join(home, 'workspaces'), { recursive: true })
