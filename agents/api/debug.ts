@@ -42,6 +42,28 @@ function lsSafe(dir: string): string[] {
   try { return readdirSync(dir) } catch { return ['(missing)'] }
 }
 
+/** Recursively list files with sizes under a directory (bounded), for upload-persistence diagnostics. */
+function lsWorkspaceTree(root: string, maxEntries: number): Array<{ path: string; bytes: number }> {
+  const out: Array<{ path: string; bytes: number }> = []
+  const walk = (dir: string): void => {
+    if (out.length >= maxEntries) return
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (out.length >= maxEntries) return
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+        continue
+      }
+      if (!entry.isFile()) continue
+      try { out.push({ path: full, bytes: statSync(full).size }) } catch { /* skip */ }
+    }
+  }
+  walk(root)
+  return out
+}
+
 export async function onRequest(context: any): Promise<Response> {
   const fsProbe = {
     cwd: process.cwd(),
@@ -342,6 +364,7 @@ export async function onRequest(context: any): Promise<Response> {
     projectsJson: tailLog(join(home, 'projects.json'), 2_000),
     sessionsDir: lsSafe(join(home, 'pi-agent', 'sessions')).slice(0, 12),
     workspaceDir: lsSafe(join(home, 'workspaces')).slice(0, 12),
+    uploads: lsWorkspaceTree(join(home, 'workspaces', '.pi-web', 'uploads'), 40),
   }
   report.logs = {
     sessiond: tailLog(join(home, 'pi-web', 'logs', 'sessiond.log')),

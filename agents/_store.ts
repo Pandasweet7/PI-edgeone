@@ -87,11 +87,12 @@ async function collectTextFiles(root: string, maxFiles: number, maxBytesPerFile:
     }
     for (const entry of entries) {
       if (Object.keys(files).length >= maxFiles) return
-      // Skip runtime dot-dirs/ignored dirs, EXCEPT the web-upload folder which
-      // lives under .pi-web/uploads and must be persisted.
-      const isDot = entry.name.startsWith('.')
-      const isUploadsDir = entry.isDirectory() && entry.name === '.pi-web' && dir === root
-      if ((isDot && !isUploadsDir) || IGNORED_DIRECTORIES.has(entry.name) || IGNORED_FILES.has(entry.name)) continue
+      // Web uploads live under .pi-web/uploads — walk .pi-web so uploads are
+      // persisted, even though it is dot-prefixed and listed in IGNORED_DIRECTORIES.
+      const isUploadsParent = entry.isDirectory() && entry.name === '.pi-web'
+      if (IGNORED_DIRECTORIES.has(entry.name) && !isUploadsParent) continue
+      if (entry.name.startsWith('.') && !isUploadsParent) continue
+      if (IGNORED_FILES.has(entry.name)) continue
       const full = join(dir, entry.name)
       if (entry.isDirectory()) {
         await walk(full)
