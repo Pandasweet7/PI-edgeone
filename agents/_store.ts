@@ -53,12 +53,17 @@ export interface PiWebSnapshot {
   projectsJson: string | null
   agentSettings: string | null
   agentModels: string | null
+  /** Archived sessions: the gateway moves archived transcripts to
+   *  $PI_WEB_DATA_DIR/archived-sessions/ and tracks them in archived-sessions.json.
+   *  Both must be persisted or archived sessions vanish on a cold start. */
+  archivedSessionsJson: string | null
+  archivedSessions: Record<string, string>
   sessions: Record<string, string>
   workspace: Record<string, string>
 }
 
 export function emptySnapshot(): PiWebSnapshot {
-  return { version: SNAPSHOT_VERSION, configJson: null, projectsJson: null, agentSettings: null, agentModels: null, sessions: {}, workspace: {} }
+  return { version: SNAPSHOT_VERSION, configJson: null, projectsJson: null, agentSettings: null, agentModels: null, archivedSessionsJson: null, archivedSessions: {}, sessions: {}, workspace: {} }
 }
 
 export function snapshotByteSize(snapshot: PiWebSnapshot): number {
@@ -121,6 +126,14 @@ export async function captureSnapshot(home: string): Promise<PiWebSnapshot> {
   snapshot.configJson = await readOptionalFile(join(home, 'pi-web', 'config.json'))
   snapshot.projectsJson = await readOptionalFile(join(home, 'projects.json'))
   snapshot.agentSettings = await readOptionalFile(join(home, 'pi-agent', 'settings.json'))
+  // Archived sessions: files moved to $PI_WEB_DATA_DIR/archived-sessions/ plus
+  // the archived-sessions.json registry. Persist both or archives vanish.
+  snapshot.archivedSessionsJson = await readOptionalFile(join(home, 'archived-sessions.json'))
+  const archivedFiles = await collectSessionFiles(join(home, 'archived-sessions'))
+  for (const item of archivedFiles.slice(0, MAX_SESSIONS)) {
+    const content = await readOptionalFile(item.path)
+    if (content !== null) snapshot.archivedSessions[item.name] = tailJsonl(content, MAX_SESSION_BYTES)
+  }
   // models.json is intentionally NOT snapshotted: its edgeone-makers provider
   // carries the local gateway proxy's port, which is freshly assigned on every
   // sidecar start (see writeAgentModels in _pi-web-sidecar.ts). Persisting it
@@ -147,15 +160,19 @@ export function trimSnapshot(snapshot: PiWebSnapshot): PiWebSnapshot {
   const trimmed = { ...snapshot, workspace: {} }
   if (snapshotByteSize(trimmed) <= SNAPSHOT_MAX_BYTES) return trimmed
   const sessions = { ...snapshot.sessions }
+  const archived = { ...snapshot.archivedSessions }
   // Drop the OLDEST sessions first so the most recent conversation always
   // survives, even when the snapshot is over budget. Session file names embed
   // an ISO timestamp; fall back to comparing full paths when unparseable.
-  const byAge = Object.keys(sessions).sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)))
-  for (const oldest of byAge) {
-    if (snapshotByteSize({ ...trimmed, sessions }) <= SNAPSHOT_MAX_BYTES) break
+  for (const oldest of Object.keys(sessions).sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)))) {
+    if (snapshotByteSize({ ...trimmed, sessions, archivedSessions: archived }) <= SNAPSHOT_MAX_BYTES) break
     delete sessions[oldest]
   }
-  return { ...trimmed, sessions }
+  for (const oldest of Object.keys(archived).sort((a, b) => sessionSortKey(a).localeCompare(sessionSortKey(b)))) {
+    if (snapshotByteSize({ ...trimmed, sessions, archivedSessions: archived }) <= SNAPSHOT_MAX_BYTES) break
+    delete archived[oldest]
+  }
+  return { ...trimmed, sessions, archivedSessions: archived }
 }
 
 /** Extract a sortable creation timestamp from a session file name (e.g. ``2026-08-19T07-08-57-961Z_id.jsonl``). */
@@ -209,7 +226,9 @@ export function isSnapshotEmpty(snapshot: PiWebSnapshot): boolean {
     snapshot.projectsJson === null &&
     snapshot.agentSettings === null &&
     snapshot.configJson === null &&
+    snapshot.archivedSessionsJson === null &&
     Object.keys(snapshot.sessions).length === 0 &&
+    Object.keys(snapshot.archivedSessions).length === 0 &&
     Object.keys(snapshot.workspace).length === 0
   )
 }
@@ -221,6 +240,12 @@ function normalizeSnapshot(raw: Partial<PiWebSnapshot>): PiWebSnapshot {
     snapshot.projectsJson = typeof raw.projectsJson === 'string' ? raw.projectsJson : null
     snapshot.agentSettings = typeof raw.agentSettings === 'string' ? raw.agentSettings : null
     snapshot.agentModels = typeof raw.agentModels === 'string' ? raw.agentModels : null
+    snapshot.archivedSessionsJson = typeof raw.archivedSessionsJson === 'string' ? raw.archivedSessionsJson : null
+    if (raw.archivedSessions !== null && typeof raw.archivedSessions === 'object' && !Array.isArray(raw.archivedSessions)) {
+      for (const [key, value] of Object.entries(raw.archivedSessions)) {
+        if (typeof value === 'string' && key.endsWith('.jsonl')) snapshot.archivedSessions[key] = value
+      }
+    }
     if (raw.sessions !== null && typeof raw.sessions === 'object' && !Array.isArray(raw.sessions)) {
       for (const [key, value] of Object.entries(raw.sessions)) {
         if (typeof value === 'string' && key.endsWith('.jsonl')) snapshot.sessions[key] = value
@@ -241,6 +266,13 @@ export async function restoreSnapshot(home: string, snapshot: PiWebSnapshot): Pr
   await writeMaybe(join(home, 'pi-web', 'config.json'), snapshot.configJson)
   await writeMaybe(join(home, 'projects.json'), snapshot.projectsJson)
   await writeMaybe(join(home, 'pi-agent', 'settings.json'), snapshot.agentSettings)
+  await writeMaybe(join(home, 'archived-sessions.json'), snapshot.archivedSessionsJson)
+  for (const [name, content] of Object.entries(snapshot.archivedSessions)) {
+    if (typeof content !== 'string') continue
+    const target = join(home, 'archived-sessions', name)
+    await mkdir(join(target, '..'), { recursive: true })
+    await writeFile(target, content)
+  }
   // models.json is rebuilt with the current gateway proxy port at sidecar
   // startup; do not restore a possibly stale one from an older snapshot.
   for (const [name, content] of Object.entries(snapshot.sessions)) {

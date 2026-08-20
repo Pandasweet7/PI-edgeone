@@ -1,4 +1,4 @@
-import { stopPiWebSidecar } from './_pi-web-sidecar.ts'
+import { stableConversationId, stopPiWebSidecar } from './_pi-web-sidecar.ts'
 
 /**
  * POST /stop — snapshot and shut down the conversation's PI WEB sidecar, then
@@ -7,7 +7,7 @@ import { stopPiWebSidecar } from './_pi-web-sidecar.ts'
  */
 export async function onRequest(context: any): Promise<Response> {
   try {
-    const conversationId = String(context.request?.body?.conversation_id || context.conversation_id || '').trim()
+    const conversationId = stableConversationId(context)
     if (!conversationId) {
       return Response.json({ ok: false, error: 'conversation_id is required' }, { status: 400 })
     }

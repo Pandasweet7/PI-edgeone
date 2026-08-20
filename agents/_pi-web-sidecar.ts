@@ -96,6 +96,26 @@ export function piWebHomeFor(conversationId: string): string {
   return join('/tmp', 'piweb-makers', safeSegment(conversationId))
 }
 
+/**
+ * Deterministic per-user conversation id for cross-browser persistence.
+ * The Makers platform scopes `context.store` (and the agent's sticky routing)
+ * by `context.conversation_id`, which the browser sets to its own random UUID
+ * via the makers-conversation-id header — so a second browser/device would see
+ * an empty, isolated conversation. Derive a stable id from the authenticated
+ * deployment identity instead, so every browser of the same user shares ONE
+ * persisted conversation (sessions, projects, workspace files).
+ */
+export function stableConversationId(context: any): string {
+  const env = context?.env ?? {}
+  const seed = String(env.SITE_USERNAME || env.AI_GATEWAY_API_KEY || 'pi-web-makers')
+  let h = 0x811c9dc5
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return 'u' + (h >>> 0).toString(16).padStart(8, '0')
+}
+
 const MAKERS_PROVIDER = 'edgeone-makers'
 const MAKERS_GATEWAY_API_KEY_ENV = 'MAKERS_GATEWAY_API_KEY'
 const DEFAULT_MAKERS_MODEL = '@makers/deepseek-v4-flash'
@@ -295,18 +315,25 @@ async function startSidecar(context: any, conversationId: string): Promise<PiWeb
   await mkdir(home, { recursive: true })
   // Restore persisted state (settings, sessions, workspace) before booting.
   let snapshot = await readSnapshotFromStore(context, conversationId)
-  // One-time migration: the middleware now pins every browser to a stable
-  // conversation id (hash of the authenticated user). If this stable
-  // conversation is still empty, carry over the state this browser had stored
-  // under its old random makers-conversation-id so the user's prior dialogue
-  // is not stranded. (Open the browser that has the old dialogue first.)
+  // One-time migration: state is now keyed by the per-user stable id, but the
+  // user's prior dialogue may still be stored under the browser's original
+  // random conversation id. If the stable conversation is still empty, carry
+  // that old state over. The browser's old id arrives either as the
+  // x-makers-original-conversation-id header (middleware rewrite path) or as
+  // context.conversation_id directly (no rewrite).
   if (isSnapshotEmpty(snapshot)) {
-    const originalId = String(context?.request?.headers?.['x-makers-original-conversation-id'] ?? '').trim()
-    if (originalId !== '' && originalId !== conversationId) {
-      const original = await readSnapshotFromStore(context, originalId)
+    const candidates: string[] = []
+    const originalHeader = String(context?.request?.headers?.['x-makers-original-conversation-id'] ?? '').trim()
+    const ctxId = String(context?.conversation_id ?? '').trim()
+    if (originalHeader !== '') candidates.push(originalHeader)
+    if (ctxId !== '' && ctxId !== originalHeader) candidates.push(ctxId)
+    for (const candidateId of candidates) {
+      if (candidateId === conversationId) continue
+      const original = await readSnapshotFromStore(context, candidateId)
       if (!isSnapshotEmpty(original)) {
         snapshot = original
         try { await writeSnapshotToStore(context, conversationId, original) } catch { /* best effort */ }
+        break
       }
     }
   }
@@ -467,7 +494,11 @@ function sweepIdleSidecars(): void {
 }
 
 export async function getPiWebSidecar(context: any, conversationIdOverride?: string): Promise<PiWebSidecar> {
-  const conversationId = (conversationIdOverride ?? String(context.conversation_id || '')).trim()
+  // Prefer the per-user stable id so every browser of the same user converges
+  // on one persisted conversation (see stableConversationId). The middleware
+  // also rewrites makers-conversation-id, but the browser's own random id must
+  // never be used to key the sidecar/state.
+  const conversationId = (conversationIdOverride ?? stableConversationId(context)).trim()
   if (!conversationId) throw new Error('makers-conversation-id is required for PI WEB.')
   sweepIdleSidecars()
   let pending = sidecars.get(conversationId)

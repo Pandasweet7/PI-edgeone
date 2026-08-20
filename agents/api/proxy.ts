@@ -59,10 +59,6 @@ function decodeTarget(raw: string): string {
  * 127.0.0.1. Mutating requests schedule a store snapshot afterwards.
  */
 async function proxy(context: any): Promise<Response> {
-  const conversationId = String(context.conversation_id || '').trim()
-  if (!conversationId) {
-    return Response.json({ error: 'makers-conversation-id is required' }, { status: 400 })
-  }
   const sidecar = await getPiWebSidecar(context)
 
   const query = context.request?.query ?? {}
@@ -115,7 +111,7 @@ async function proxy(context: any): Promise<Response> {
   const isBinary = !contentTypeHeader.includes('json') && !contentTypeHeader.includes('text') && !contentTypeHeader.includes('event-stream')
   if (isBinary) responseHeaders.set('x-content-type-stream', 'true')
 
-  if (isMutating(method) && upstream.ok) scheduleSnapshot(conversationId, sidecar)
+  if (isMutating(method) && upstream.ok) scheduleSnapshot(sidecar.conversationId, sidecar)
 
   const bytes = new Uint8Array(await upstream.arrayBuffer())
   return new Response(bytes, { status: upstream.status, headers: responseHeaders })

@@ -9,24 +9,13 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { getPiWebSidecar, piWebHomeFor } from '../_pi-web-sidecar.ts'
+import { getPiWebSidecar, piWebHomeFor, stableConversationId } from '../_pi-web-sidecar.ts'
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   })
-}
-
-/** Mirror of middleware.js stableConversationId for verification. */
-function fnv1aStableId(seed: string): string {
-  const source = seed || 'pi-web-makers'
-  let h = 0x811c9dc5
-  for (let i = 0; i < source.length; i++) {
-    h ^= source.charCodeAt(i)
-    h = Math.imul(h, 0x01000193)
-  }
-  return 'u' + (h >>> 0).toString(16).padStart(8, '0')
 }
 
 function tailLog(path: string, bytes = 3_000): string {
@@ -84,7 +73,7 @@ export async function onRequest(context: any): Promise<Response> {
     // After the fix these two should be equal; before they differ (browser id).
     conversationIdentity: {
       makersContextConversationId: String(context?.conversation_id ?? '(none)'),
-      expectedStableId: fnv1aStableId(String(context?.env?.SITE_USERNAME ?? '')),
+      expectedStableId: stableConversationId(context),
     },
     envProbe: {
       AI_GATEWAY_API_KEY: context?.env?.AI_GATEWAY_API_KEY ? '(set)' : '(missing)',
@@ -112,9 +101,7 @@ export async function onRequest(context: any): Promise<Response> {
     homesDu: (() => { try { return execFileSync('du', ['-sh', '/tmp/piweb-makers', '/tmp/npm-cache'], { timeout: 10_000 }).toString().trim() } catch { return '(du unavailable)' } })(),
   }
 
-  const conversationId = String(context?.conversation_id ?? context?.request?.query?.conversation ?? '').trim()
-    || String(context?.request?.query?.cid ?? '').trim()
-    || `debug-${Math.random().toString(36).slice(2, 10)}`
+  const conversationId = stableConversationId(context)
 
   // --- Conversation-store diagnostics -------------------------------------
   // The snapshot persistence (agents/_store.ts) silently no-ops when
@@ -162,6 +149,33 @@ export async function onRequest(context: any): Promise<Response> {
   }
   report.conversationStore = storeProbe
   // ------------------------------------------------------------------------
+
+  // Cross-conversation store probe: the robust cross-browser fix keys the
+  // snapshot metadata under the per-user stable id, which may differ from the
+  // request's conversation_id. Verify the store allows that.
+  const crossProbe: Record<string, unknown> = {
+    stableId: conversationId,
+    requestConversationId: String(context?.conversation_id ?? ''),
+  }
+  if (context?.store && context?.conversation_id && String(context.conversation_id) !== conversationId) {
+    const k = 'piWebCrossProbe'
+    const v = `cross-${Date.now()}`
+    try {
+      await context.store.updateConversation({ conversationId, metadata: { [k]: v } })
+      const reread = await context.store.getConversation({ conversationId })
+      crossProbe.writeReadUnderStableId = reread?.metadata?.[k] === v ? 'OK' : 'FAILED'
+      try {
+        const cleaned = { ...(reread?.metadata ?? {}) }
+        delete cleaned[k]
+        await context.store.updateConversation({ conversationId, metadata: cleaned })
+      } catch { /* best effort */ }
+    } catch (error) {
+      crossProbe.writeReadUnderStableId = `FAILED: ${String(error).slice(0, 160)}`
+    }
+  } else {
+    crossProbe.skipped = 'request conversation_id equals stable id (or store absent)'
+  }
+  report.crossConversationStore = crossProbe
   const aiGatewayProbe: Record<string, unknown> = {}
   {
     const baseUrl = String(context?.env?.AI_GATEWAY_BASE_URL ?? '').replace(/\/+$/, '')
